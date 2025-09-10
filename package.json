@@ -2,13 +2,13 @@
   "name": "shopify-data-ingestion-service",
   "version": "1.0.0",
   "description": "",
-  "main": "src/server.js",
+  "main": "backend/src/server.js",
   "directories": {
     "doc": "docs"
   },
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "dev": "nodemon backend/src/server.js",
+    "start": "node backend/src/server.js",
     "migrate": "prisma migrate dev",
     "generate": "prisma generate",
     "seed": "node prisma/seed.js"
@@ -22,6 +22,7 @@
   "dependencies": {
     "@prisma/client": "^6.15.0",
     "@shopify/shopify-api": "^11.14.1",
+    "@shopify/shopify-app-session-storage-prisma": "^6.0.9",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
     "bull": "^4.16.5",

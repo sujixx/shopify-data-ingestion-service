@@ -1,3 +1,5 @@
+require('@shopify/shopify-api/adapters/node');
+
 const { shopifyApi } = require('@shopify/shopify-api');
 const { PrismaSessionStorage } = require('@shopify/shopify-app-session-storage-prisma');
 const { PrismaClient } = require('@prisma/client');
