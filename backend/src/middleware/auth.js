@@ -1,72 +1,57 @@
- 
-const express = require('express');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { body, validationResult } = require('express-validator');
 const { PrismaClient } = require('@prisma/client');
 
-const router = express.Router();
 const prisma = new PrismaClient();
 
-// Register
-router.post('/register', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }),
-  body('firstName').notEmpty(),
-  body('lastName').notEmpty(),
-  body('companyName').notEmpty()
-], async (req, res) => {
+/**
+ * Express JWT authentication middleware.
+ * Usage: router.get('/protected', authenticate, handler)
+ */
+const authenticate = async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
 
-    const { email, password, firstName, lastName, companyName } = req.body;
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
 
-    const existingUser = await prisma.user.findFirst({ where: { email } });
-    if (existingUser) return res.status(409).json({ error: 'User exists' });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    const result = await prisma.$transaction(async tx => {
-      const tenant = await tx.tenant.create({ data: { name: companyName } });
-      const user = await tx.user.create({ data: { email, password: hashedPassword, firstName, lastName, role: 'ADMIN', tenantId: tenant.id } });
-      return { tenant, user };
+    // Find user, include their tenant for validation
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: { tenant: true }
     });
 
-    const token = jwt.sign({ userId: result.user.id, email: result.user.email, tenantId: result.tenant.id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
+    if (!user || !user.isActive || !user.tenant || !user.tenant.isActive) {
+      return res.status(401).json({ error: 'Invalid or inactive user/tenant' });
+    }
 
-    res.status(201).json({ success: true, token, user: result.user, tenant: result.tenant });
+    // Attach user/context to request
+    req.user = user;
+    req.tenantId = user.tenantId;
+    req.tenant = user.tenant;
+
+    next();
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Registration failed' });
+    return res.status(401).json({ error: 'Authentication failed' });
   }
-});
+};
 
-// Login
-router.post('/login', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty()
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+/**
+ * JWT token generator for use in your /login & /register.
+ */
+const generateToken = (user) => jwt.sign(
+  {
+    userId: user.id,
+    email: user.email,
+    tenantId: user.tenantId
+  },
+  process.env.JWT_SECRET,
+  { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+);
 
-    const { email, password } = req.body;
-    const user = await prisma.user.findFirst({ where: { email, isActive: true }, include: { tenant: true } });
-    if (!user || !user.tenant.isActive) return res.status(401).json({ error: 'Invalid credentials' });
-
-    const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) return res.status(401).json({ error: 'Invalid credentials' });
-
-    const token = jwt.sign({ userId: user.id, email: user.email, tenantId: user.tenant.id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
-
-    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-
-    res.json({ success: true, token, user, tenant: user.tenant });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-module.exports = router;
+module.exports = { authenticate, generateToken };
