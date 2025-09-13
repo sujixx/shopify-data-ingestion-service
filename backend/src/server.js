@@ -10,6 +10,7 @@ const bodyParser = require('body-parser');
 
 const { PrismaClient } = require('@prisma/client');
 
+const verifyRouter = require('./routes/verify');
 const authRouter = require('./routes/auth');
 const shopifyRouter = require('./routes/shopify');
 const analyticsRouter = require('./routes/analytics');
@@ -54,6 +55,7 @@ app.use((req, res, next) => {
   return bodyParser.json({ limit: '10mb' })(req, res, next);
 });
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use('/api/verify', verifyRouter);
 
 // If you previously had `express.json({ verify: ... })` storing req.rawBody,
 // remove it. We use RAW only inside the shopify router for the webhook.
