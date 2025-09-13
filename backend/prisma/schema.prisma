@@ -7,49 +7,48 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Shopify App Sessions (required for Shopify integration)
+/* Shopify sessions for @shopify/...-prisma */
 model Session {
-  id          String    @id
-  shop        String
-  state       String
-  isOnline    Boolean   @default(false)
-  scope       String?
-  expires     DateTime?
-  accessToken String
-  userId      String?
-  firstName   String?
-  lastName    String?
-  email       String?
-  accountOwner Boolean  @default(false)
-  locale      String?
-  collaborator Boolean? @default(false)
+  id            String   @id
+  shop          String
+  state         String
+  isOnline      Boolean  @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        String?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean  @default(false)
+  locale        String?
+  collaborator  Boolean? @default(false)
   emailVerified Boolean? @default(false)
-  
+
   @@map("sessions")
 }
 
-// Your multi-tenant structure
 model Tenant {
-  id                String       @id @default(uuid())
-  name             String       @unique
-  shopifyDomain    String?      @unique  // Links to Shopify store
-  shopifyToken     String?      // Encrypted access token
-  isActive         Boolean      @default(true)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  
-  users            User[]
-  customers        Customer[]
-  products         Product[]
-  orders           Order[]
-  webhookLogs      WebhookLog[]
-  
+  id            String   @id @default(uuid())
+  name          String   @unique
+  shopifyDomain String?  @unique
+  shopifyToken  String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users       User[]
+  customers   Customer[]
+  products    Product[]
+  orders      Order[]
+  webhookLogs WebhookLog[]
+
   @@map("tenants")
 }
 
 model User {
   id          String   @id @default(uuid())
-  email       String   
+  email       String
   password    String
   firstName   String
   lastName    String
@@ -58,75 +57,79 @@ model User {
   lastLoginAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  @@unique([email, tenantId])
+
+  tenantId String
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([email, tenantId], name: "email_tenantId")
   @@map("users")
 }
 
 model Customer {
-  id                 String      @id @default(uuid())
-  shopifyCustomerId  String?
-  email              String
-  firstName          String?
-  lastName           String?
-  phone              String?
-  totalSpent         Float       @default(0)
-  ordersCount        Int         @default(0)
-  lastOrderDate      DateTime?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
-  
-  tenantId           String
-  tenant             Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders             Order[]
-  
-  @@unique([email, tenantId])
+  id                String   @id @default(uuid())
+  shopifyCustomerId String?
+  email             String?
+  firstName         String?
+  lastName          String?
+  phone             String?
+  totalSpent        Float    @default(0)
+  ordersCount       Int      @default(0)
+  lastOrderDate     DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenantId String
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders   Order[]
+
+  @@unique([tenantId, shopifyCustomerId], name: "tenant_shopifyCustomerId")
+  @@index([tenantId, email])
   @@index([shopifyCustomerId, tenantId])
   @@map("customers")
 }
 
 model Product {
-  id               String      @id @default(uuid())
+  id               String   @id @default(uuid())
   shopifyProductId String?
   title            String
   handle           String?
-  description      String?     @db.Text
+  description      String?  @db.Text
   price            Float
   sku              String?
   vendor           String?
-  status           String      @default("active")
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  
-  tenantId         String
-  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orderItems       OrderItem[]
-  
+  status           String   @default("active")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenantId   String
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@unique([tenantId, shopifyProductId], name: "tenant_shopifyProductId")
   @@index([shopifyProductId, tenantId])
   @@map("products")
 }
 
 model Order {
-  id               String         @id @default(uuid())
-  shopifyOrderId   String?
-  orderNumber      String
-  email            String?
-  totalPrice       Float
-  currency         String         @default("USD")
-  status           OrderStatus    @default(PENDING)
-  processedAt      DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  
-  tenantId         String
-  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customerId       String?
-  customer         Customer?      @relation(fields: [customerId], references: [id])
-  orderItems       OrderItem[]
-  
+  id             String      @id @default(uuid())
+  shopifyOrderId String?
+  orderNumber    String
+  email          String?
+  totalPrice     Float
+  currency       String      @default("USD")
+  status         OrderStatus @default(PENDING)
+  processedAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  orderItems OrderItem[]
+
+  @@unique([tenantId, shopifyOrderId], name: "tenant_shopifyOrderId")
+  @@index([tenantId, createdAt])
   @@index([shopifyOrderId, tenantId])
   @@map("orders")
 }
@@ -138,26 +141,28 @@ model OrderItem {
   totalPrice Float
   title      String
   sku        String?
-  
-  orderId    String
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId  String?
-  product    Product? @relation(fields: [productId], references: [id])
-  
+
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+
   @@map("order_items")
 }
 
 model WebhookLog {
-  id           String         @id @default(uuid())
+  id           String        @id @default(uuid())
   event        String
   payload      Json
-  status       WebhookStatus  @default(PENDING)
-  errorMessage String?        @db.Text
-  createdAt    DateTime       @default(now())
-  
-  tenantId     String
-  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
+  status       WebhookStatus @default(PENDING)
+  errorMessage String?       @db.Text
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, event, createdAt])
   @@map("webhook_logs")
 }
 
