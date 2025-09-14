@@ -1,27 +1,24 @@
 {
-  "name": "shopify-data-ingestion-service",
+  "name": "shopify-data-ingestion-service-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "backend/src/server.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "private": true,
+  "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon backend/src/server.js",
-    "start": "node backend/src/server.js",
-    "migrate": "prisma migrate dev",
-    "generate": "prisma generate",
-    "seed": "prisma db seed",
-    "postinstall": "prisma generate"
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
 
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "prisma:seed": "node prisma/seed.js",
+
+    "seed": "node prisma/seed.js",
+    "postinstall": "prisma generate --schema prisma/schema.prisma"
   },
   "prisma": {
-    "schema": "backend/prisma/schema.prisma",
-    "seed": "node backend/prisma/seed.js"
+    "schema": "prisma/schema.prisma",
+    "seed": "node prisma/seed.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@prisma/client": "^6.15.0",
     "@shopify/shopify-api": "^11.14.1",
