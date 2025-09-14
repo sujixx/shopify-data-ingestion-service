@@ -234,22 +234,62 @@ router.post('/webhook', rawJson, async (req, res) => {
 });
 
 // POST /api/shopify/connect  (save dev-store domain on current tenant)
+// POST /api/shopify/connect  (handle domain already attached to another tenant)
 router.post('/connect', authenticate, async (req, res) => {
   try {
     const { shopifyDomain } = req.body;
-    if (!shopifyDomain) return res.status(400).json({ error: 'shopifyDomain is required' });
+    if (!shopifyDomain) {
+      return res.status(400).json({ error: 'shopifyDomain is required' });
+    }
 
-    const tenant = await prisma.tenant.update({
-      where: { id: req.tenantId },
-      data: { shopifyDomain },
+    // Normalize input a bit
+    const domain = String(shopifyDomain).trim().toLowerCase();
+
+    // Current tenant (from JWT)
+    const currentTenant = await prisma.tenant.findUnique({ where: { id: req.tenantId } });
+    if (!currentTenant) {
+      return res.status(404).json({ error: 'Current tenant not found' });
+    }
+
+    // Is this domain already owned by some tenant?
+    const existing = await prisma.tenant.findFirst({
+      where: { shopifyDomain: domain },
     });
 
-    return res.json({ success: true, tenant });
+    // If already set on this same tenant, return success
+    if (existing && existing.id === currentTenant.id) {
+      return res.json({ success: true, tenant: existing, note: 'Domain already connected' });
+    }
+
+    // If owned by a different tenant, move the current user to that tenant
+    // (Common case: OAuth created a separate tenant row with this domain earlier.)
+    if (existing && existing.id !== currentTenant.id) {
+      // Reassign the current user to the existing tenant
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { tenantId: existing.id },
+      });
+
+      return res.status(200).json({
+        success: true,
+        tenant: existing,
+        note: 'Domain already linked to another tenant. Your user has been re-linked to that tenant.',
+      });
+    }
+
+    // Otherwise, set the domain on the current tenant
+    const updated = await prisma.tenant.update({
+      where: { id: currentTenant.id },
+      data: { shopifyDomain: domain },
+    });
+
+    return res.json({ success: true, tenant: updated });
   } catch (e) {
     console.error('Connect error:', e);
     return res.status(500).json({ error: 'Failed to connect shop' });
   }
 });
+
 
 // POST /api/shopify/sync  (create a bit of sample data)
 router.post('/sync', authenticate, async (req, res) => {
