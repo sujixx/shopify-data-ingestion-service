@@ -22,11 +22,11 @@ const OAUTH_SCOPES =
 // ---------- HMAC verify ----------
 function isValidHmac(req) {
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256') || '';
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET || process.env.SHOPIFY_API_SECRET;
   const digest = crypto
-    .createHmac('sha256', SHOPIFY_WEBHOOK_SECRET)
-    .update(req.body) // Buffer (because rawJson used)
+    .createHmac('sha256', secret)
+    .update(req.body) // Buffer (raw)
     .digest('base64');
-
   try {
     return crypto.timingSafeEqual(Buffer.from(hmacHeader), Buffer.from(digest));
   } catch {
