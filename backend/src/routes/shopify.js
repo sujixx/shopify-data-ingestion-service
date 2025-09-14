@@ -3,20 +3,30 @@ const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
 const { PrismaClient } = require('@prisma/client');
+const { authenticate } = require('../middleware/auth');
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
-// RAW body only on the webhook route (needed for HMAC)
+// Use raw body ONLY for webhook route so HMAC works reliably
 const rawJson = express.raw({ type: 'application/json' });
 
-/* -------------------- HMAC -------------------- */
+// Env helpers
+const APP_URL = process.env.SHOPIFY_APP_URL || process.env.APP_URL;
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
+const SHOPIFY_WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET || SHOPIFY_API_SECRET;
+const OAUTH_SCOPES =
+  process.env.SCOPES || 'read_products,read_customers,read_orders,write_webhooks';
+
+// ---------- HMAC verify ----------
 function isValidHmac(req) {
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256') || '';
   const digest = crypto
-    .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
-    .update(req.body) // Buffer
+    .createHmac('sha256', SHOPIFY_WEBHOOK_SECRET)
+    .update(req.body) // Buffer (because rawJson used)
     .digest('base64');
+
   try {
     return crypto.timingSafeEqual(Buffer.from(hmacHeader), Buffer.from(digest));
   } catch {
@@ -24,177 +34,177 @@ function isValidHmac(req) {
   }
 }
 
-/* ------------- Upsert helpers (YOUR schema) ------------- */
+// ---------- Helpers: write with findFirst + create/update (fits your schema) ----------
 async function upsertCustomer(tenantId, c) {
-  const customer = c || {};
-  const shopifyCustomerId = customer.id ? String(customer.id) : null;
+  const shopifyCustomerId = c?.id ? String(c.id) : null;
 
-  return prisma.customer.upsert({
-    where: { tenantId_shopifyCustomerId: { tenantId, shopifyCustomerId } },
-    update: {
-      email: customer.email ?? undefined,
-      firstName: customer.first_name ?? undefined,
-      lastName: customer.last_name ?? undefined,
-      phone: customer.phone ?? undefined,
-      totalSpent: customer.total_spent != null ? parseFloat(customer.total_spent) : undefined,
-      ordersCount: customer.orders_count != null ? Number(customer.orders_count) : undefined,
-      lastOrderDate: customer.last_order?.created_at ? new Date(customer.last_order.created_at) : undefined,
-    },
-    create: {
-      tenantId,
-      shopifyCustomerId,
-      email: customer.email || null,
-      firstName: customer.first_name || null,
-      lastName: customer.last_name || null,
-      phone: customer.phone || null,
-      totalSpent: customer.total_spent != null ? parseFloat(customer.total_spent) : 0,
-      ordersCount: customer.orders_count != null ? Number(customer.orders_count) : 0,
-      lastOrderDate: customer.last_order?.created_at ? new Date(customer.last_order.created_at) : null,
-    },
-  });
+  // Try by Shopify ID then by email (both are non-unique in your schema; email+tenant is unique)
+  let existing =
+    (shopifyCustomerId &&
+      (await prisma.customer.findFirst({
+        where: { tenantId, shopifyCustomerId },
+      }))) ||
+    (c?.email &&
+      (await prisma.customer.findFirst({
+        where: { tenantId, email: c.email },
+      })));
+
+  const data = {
+    tenantId,
+    shopifyCustomerId,
+    email: c?.email || null,
+    firstName: c?.first_name || null,
+    lastName: c?.last_name || null,
+    phone: c?.phone || null,
+    totalSpent: c?.total_spent != null ? parseFloat(c.total_spent) : 0,
+    ordersCount: c?.orders_count != null ? Number(c.orders_count) : 0,
+    lastOrderDate: c?.last_order?.created_at ? new Date(c.last_order.created_at) : null,
+  };
+
+  if (existing) {
+    return prisma.customer.update({ where: { id: existing.id }, data });
+  } else {
+    return prisma.customer.create({ data });
+  }
 }
 
 async function upsertProduct(tenantId, p) {
-  const product = p || {};
-  const shopifyProductId = product.id ? String(product.id) : null;
-  const price = product.variants?.[0]?.price != null ? parseFloat(product.variants[0].price) : 0;
+  const shopifyProductId = p?.id ? String(p.id) : null;
+  const firstVariant = Array.isArray(p?.variants) && p.variants[0] ? p.variants[0] : null;
+  const price = firstVariant?.price != null ? parseFloat(firstVariant.price) : 0;
 
-  return prisma.product.upsert({
-    where: { tenantId_shopifyProductId: { tenantId, shopifyProductId } },
-    update: {
-      title: product.title ?? undefined,
-      handle: product.handle ?? undefined,
-      description: product.body_html ?? undefined,
-      price,
-      sku: product.variants?.[0]?.sku ?? undefined,
-      vendor: product.vendor ?? undefined,
-      status: product.status ?? undefined,
-    },
-    create: {
-      tenantId,
-      shopifyProductId,
-      title: product.title || 'Untitled',
-      handle: product.handle || null,
-      description: product.body_html || null,
-      price,
-      sku: product.variants?.[0]?.sku || null,
-      vendor: product.vendor || null,
-      status: product.status || 'active',
-    },
-  });
+  let existing =
+    (shopifyProductId &&
+      (await prisma.product.findFirst({
+        where: { tenantId, shopifyProductId },
+      }))) || null;
+
+  const data = {
+    tenantId,
+    shopifyProductId,
+    title: p?.title || 'Untitled',
+    handle: p?.handle || null,
+    description: p?.body_html || null,
+    price,
+    sku: firstVariant?.sku || null,
+    vendor: p?.vendor || null,
+    status: p?.status || 'active',
+  };
+
+  if (existing) {
+    return prisma.product.update({ where: { id: existing.id }, data });
+  } else {
+    return prisma.product.create({ data });
+  }
 }
 
-function mapOrderStatus(o) {
-  const s = (o.financial_status || o.fulfillment_status || 'pending').toUpperCase();
-  if (s.includes('CANCEL')) return 'CANCELLED';
-  if (s.includes('SHIPPED') || s.includes('FULFILLED')) return 'SHIPPED';
-  if (s.includes('PAID')) return 'CONFIRMED';
+function mapOrderStatus(shopify) {
+  const cancelled = !!shopify?.cancelled_at;
+  const financial = (shopify?.financial_status || '').toLowerCase();
+  const fulfill = (shopify?.fulfillment_status || '').toLowerCase();
+
+  if (cancelled) return 'CANCELLED';
+  if (financial.includes('paid') || financial.includes('partially_paid')) return 'CONFIRMED';
+  if (fulfill.includes('fulfilled') || fulfill.includes('shipped')) return 'SHIPPED';
   return 'PENDING';
 }
 
 async function upsertOrder(tenantId, o) {
-  const order = o || {};
-  const shopifyOrderId = order.id ? String(order.id) : null;
-  const orderNumber = order.name || String(order.order_number || shopifyOrderId || '');
-  const totalPrice = order.total_price != null ? parseFloat(order.total_price) : 0;
-  const currency = order.currency || 'USD';
-  const processedAt = order.processed_at ? new Date(order.processed_at) : null;
-  const createdAt = order.created_at ? new Date(order.created_at) : new Date();
-  const status = mapOrderStatus(order);
+  const shopifyOrderId = o?.id ? String(o.id) : null;
 
+  let existing =
+    (shopifyOrderId &&
+      (await prisma.order.findFirst({
+        where: { tenantId, shopifyOrderId },
+      }))) || null;
+
+  // Ensure customer exists/linked
   let customerId = null;
-  if (order.customer?.id) {
-    const c = await upsertCustomer(tenantId, order.customer);
-    customerId = c.id;
+  if (o?.customer) {
+    const cust = await upsertCustomer(tenantId, o.customer);
+    customerId = cust.id;
   }
 
-  const saved = await prisma.order.upsert({
-    where: { tenantId_shopifyOrderId: { tenantId, shopifyOrderId } },
-    update: {
-      orderNumber,
-      email: order.email ?? undefined,
-      totalPrice,
-      currency,
-      status,
-      processedAt: processedAt ?? undefined,
-      createdAt,
-      customerId: customerId ?? undefined,
-    },
-    create: {
-      tenantId,
-      shopifyOrderId,
-      orderNumber,
-      email: order.email || null,
-      totalPrice,
-      currency,
-      status,
-      processedAt,
-      createdAt,
-      customerId,
-    },
-  });
+  const data = {
+    tenantId,
+    shopifyOrderId,
+    orderNumber: String(o?.name || o?.order_number || shopifyOrderId || ''),
+    email: o?.email || o?.contact_email || null,
+    totalPrice: o?.total_price != null ? parseFloat(o.total_price) : 0,
+    currency: o?.currency || 'USD',
+    status: mapOrderStatus(o),
+    processedAt: o?.processed_at ? new Date(o.processed_at) : null,
+    createdAt: o?.created_at ? new Date(o.created_at) : undefined, // keep default now() on create
+    customerId: customerId || null,
+  };
 
-  // Replace items
-  await prisma.orderItem.deleteMany({ where: { orderId: saved.id } });
-  for (const li of order.line_items || []) {
-    const qty = li.quantity != null ? Number(li.quantity) : 1;
-    const unitPrice = li.price != null ? parseFloat(li.price) : 0;
-    const total = Number((unitPrice * qty).toFixed(2));
+  let saved;
+  if (existing) {
+    saved = await prisma.order.update({ where: { id: existing.id }, data });
+    await prisma.orderItem.deleteMany({ where: { orderId: saved.id } });
+  } else {
+    saved = await prisma.order.create({ data });
+  }
 
-    let productId = null;
-    if (li.product_id) {
-      const p = await prisma.product.upsert({
-        where: { tenantId_shopifyProductId: { tenantId, shopifyProductId: String(li.product_id) } },
-        update: { title: li.name ?? undefined, sku: li.sku ?? undefined, price: unitPrice },
-        create: {
-          tenantId,
-          shopifyProductId: String(li.product_id),
-          title: li.name || 'Untitled',
-          price: unitPrice,
-          sku: li.sku || null,
+  // Line items
+  if (Array.isArray(o?.line_items)) {
+    for (const li of o.line_items) {
+      const qty = li?.quantity != null ? Number(li.quantity) : 1;
+      const unitPrice = li?.price != null ? parseFloat(li.price) : 0;
+      const total = Number((unitPrice * qty).toFixed(2));
+
+      let productId = null;
+      if (li?.product_id) {
+        const prod = await upsertProduct(tenantId, {
+          id: li.product_id,
+          title: li.name,
+          variants: [{ price: unitPrice, sku: li.sku }],
+          vendor: null,
           status: 'active',
+        });
+        productId = prod.id;
+      }
+
+      await prisma.orderItem.create({
+        data: {
+          orderId: saved.id,
+          productId,
+          title: li?.name || 'Item',
+          sku: li?.sku || null,
+          quantity: qty,
+          price: unitPrice,
+          totalPrice: total,
         },
       });
-      productId = p.id;
     }
-
-    await prisma.orderItem.create({
-      data: {
-        orderId: saved.id,
-        productId,
-        title: li.name || 'Item',
-        sku: li.sku || null,
-        quantity: qty,
-        price: unitPrice,
-        totalPrice: total,
-      },
-    });
   }
 
   return saved;
 }
 
-/* ----------------- Topic router ----------------- */
 async function processWebhook(tenantId, topic, payload) {
   const t = (topic || '').toLowerCase();
-  if (t.startsWith('customers/')) {
-    const c = payload.customer || payload;
+
+  if (t.startsWith('customers')) {
+    const c = payload?.customer || payload;
     await upsertCustomer(tenantId, c);
     return;
   }
-  if (t.startsWith('products/')) {
-    const p = payload.product || payload;
+  if (t.startsWith('products')) {
+    const p = payload?.product || payload;
     await upsertProduct(tenantId, p);
     return;
   }
-  if (t.startsWith('orders/')) {
-    const o = payload.order || payload;
+  if (t.startsWith('orders')) {
+    const o = payload?.order || payload;
     await upsertOrder(tenantId, o);
     return;
   }
 }
 
-/* ----------------- Webhook Endpoint ----------------- */
+// ---------- Routes ----------
+
+// POST /api/shopify/webhook  (raw JSON body)
 router.post('/webhook', rawJson, async (req, res) => {
   if (!isValidHmac(req)) return res.status(401).send('Invalid signature');
 
@@ -206,7 +216,7 @@ router.post('/webhook', rawJson, async (req, res) => {
   if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
   const log = await prisma.webhookLog.create({
-    data: { tenantId: tenant.id, event: topic, payload, status: 'PENDING' },
+    data: { tenantId: tenant.id, event: topic, payload, status: 'PROCESSING' },
   });
 
   try {
@@ -216,29 +226,113 @@ router.post('/webhook', rawJson, async (req, res) => {
   } catch (err) {
     await prisma.webhookLog.update({
       where: { id: log.id },
-      data: { status: 'FAILED', errorMessage: String(err) },
+      data: { status: 'FAILED', errorMessage: String(err?.message || err) },
     });
     console.error('Webhook processing failed:', err);
     return res.status(500).json({ error: 'processing failed' });
   }
 });
 
-/* ----------------- OAuth (simple) ----------------- */
-const oauthStates = new Map(); // in-memory state store for dev
+// POST /api/shopify/connect  (save dev-store domain on current tenant)
+router.post('/connect', authenticate, async (req, res) => {
+  try {
+    const { shopifyDomain } = req.body;
+    if (!shopifyDomain) return res.status(400).json({ error: 'shopifyDomain is required' });
+
+    const tenant = await prisma.tenant.update({
+      where: { id: req.tenantId },
+      data: { shopifyDomain },
+    });
+
+    return res.json({ success: true, tenant });
+  } catch (e) {
+    console.error('Connect error:', e);
+    return res.status(500).json({ error: 'Failed to connect shop' });
+  }
+});
+
+// POST /api/shopify/sync  (create a bit of sample data)
+router.post('/sync', authenticate, async (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+
+    // sample customers
+    const [c1, c2] = await Promise.all([
+      prisma.customer.create({
+        data: {
+          tenantId,
+          email: `alice+${Date.now()}@example.com`,
+          firstName: 'Alice',
+          lastName: 'Lee',
+          totalSpent: 250,
+          ordersCount: 2,
+        },
+      }),
+      prisma.customer.create({
+        data: {
+          tenantId,
+          email: `bob+${Date.now()}@example.com`,
+          firstName: 'Bob',
+          lastName: 'Singh',
+          totalSpent: 600,
+          ordersCount: 5,
+        },
+      }),
+    ]);
+
+    // sample products
+    const [p1, p2] = await Promise.all([
+      prisma.product.create({
+        data: { tenantId, title: 'T-Shirt', price: 25, vendor: 'Acme', status: 'active' },
+      }),
+      prisma.product.create({
+        data: { tenantId, title: 'Sneakers', price: 120, vendor: 'Acme', status: 'active' },
+      }),
+    ]);
+
+    // sample order
+    const o1 = await prisma.order.create({
+      data: {
+        tenantId,
+        orderNumber: `SYN-${Date.now()}`,
+        totalPrice: 145,
+        currency: 'USD',
+        status: 'CONFIRMED',
+        processedAt: new Date(),
+        customerId: c1.id,
+      },
+    });
+
+    await prisma.orderItem.createMany({
+      data: [
+        { orderId: o1.id, productId: p1.id, title: p1.title, quantity: 1, price: 25, totalPrice: 25, sku: p1.sku || null },
+        { orderId: o1.id, productId: p2.id, title: p2.title, quantity: 1, price: 120, totalPrice: 120, sku: p2.sku || null },
+      ],
+    });
+
+    return res.json({ success: true, message: 'Sample data synced' });
+  } catch (e) {
+    console.error('Sync error:', e);
+    return res.status(500).json({ error: 'Sync failed' });
+  }
+});
+
+// ---------- OAuth (simple flow) ----------
+const oauthStates = new Map(); // dev-only
 
 router.get('/auth', async (req, res) => {
   const { shop } = req.query;
   if (!shop) return res.status(400).send('Missing ?shop=');
+  if (!APP_URL || !SHOPIFY_API_KEY) return res.status(500).send('App not configured');
 
   const state = crypto.randomBytes(8).toString('hex');
   oauthStates.set(shop, state);
 
-  const redirectUri = `${process.env.APP_URL}/api/shopify/auth/callback`;
-  const scopes = process.env.SCOPES || 'read_products,read_orders,read_customers,write_webhooks';
+  const redirectUri = `${APP_URL}/api/shopify/auth/callback`;
   const url =
     `https://${shop}/admin/oauth/authorize` +
-    `?client_id=${process.env.SHOPIFY_API_KEY}` +
-    `&scope=${encodeURIComponent(scopes)}` +
+    `?client_id=${SHOPIFY_API_KEY}` +
+    `&scope=${encodeURIComponent(OAUTH_SCOPES)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${state}`;
 
@@ -253,41 +347,31 @@ router.get('/auth/callback', async (req, res) => {
     if (!expected || expected !== state) return res.status(400).send('Invalid state');
     oauthStates.delete(shop);
 
-    // Exchange code for token
     const tokenRes = await axios.post(`https://${shop}/admin/oauth/access_token`, {
-      client_id: process.env.SHOPIFY_API_KEY,
-      client_secret: process.env.SHOPIFY_API_SECRET,
+      client_id: SHOPIFY_API_KEY,
+      client_secret: SHOPIFY_API_SECRET,
       code,
     });
     const accessToken = tokenRes.data.access_token;
 
-    // Save/Update Tenant (name defaults to domain if not present)
     const tenant = await prisma.tenant.upsert({
       where: { shopifyDomain: shop },
-      update: { shopifyToken: accessToken, isActive: true },
-      create: {
-        name: shop,
-        shopifyDomain: shop,
-        shopifyToken: accessToken,
-        isActive: true,
-      },
+      update: { shopifyToken: accessToken, isActive: true, name: shop },
+      create: { name: shop, shopifyDomain: shop, shopifyToken: accessToken, isActive: true },
     });
 
-    // Register webhooks
     await registerWebhooksForTenant(shop, accessToken);
 
-    res
-      .status(200)
-      .send(`Installed for ${tenant.name}. Webhooks registered. You can close this tab.`);
+    res.status(200).send(`Installed for ${tenant.name}. Webhooks registered. You can close this tab.`);
   } catch (e) {
     console.error('OAuth callback failed:', e.response?.data || e.message);
     res.status(500).send('OAuth failed');
   }
 });
 
-/* -------- Register webhooks via Admin REST -------- */
+// ---------- Webhook registration ----------
 async function registerWebhooksForTenant(shop, accessToken) {
-  const address = `${process.env.APP_URL}/api/shopify/webhook`;
+  const address = `${APP_URL}/api/shopify/webhook`;
   const topics = [
     'customers/create',
     'customers/update',
@@ -296,6 +380,7 @@ async function registerWebhooksForTenant(shop, accessToken) {
     'orders/create',
     'orders/updated',
   ];
+
   for (const topic of topics) {
     try {
       await axios.post(
@@ -303,9 +388,9 @@ async function registerWebhooksForTenant(shop, accessToken) {
         { webhook: { topic, address, format: 'json' } },
         { headers: { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } }
       );
-      // If duplicate exists, Shopify may return 422 — you can ignore errors silently if you want.
     } catch (e) {
       const code = e.response?.status;
+      // 422 = already exists; safe to ignore
       if (code !== 422) {
         console.warn(`Webhook register failed for ${topic}:`, code, e.response?.data || e.message);
       }
