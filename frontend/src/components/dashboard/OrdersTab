@@ -1,0 +1,83 @@
+import React from 'react';
+import { Card, Table, Tag } from 'antd';
+import { useRealTimeData } from '../../hooks/useRealTimeData';
+
+// Define minimal typings for customer and order to help TS
+interface Customer {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+interface Order {
+  id: string;
+  orderNumber: string;
+  customer?: Customer | null;
+  totalPrice: number;
+  status: string;
+  createdAt: string;
+}
+
+const OrdersTab: React.FC = () => {
+  const { data, loading } = useRealTimeData();
+
+  const columns = [
+    {
+      title: 'Order #',
+      dataIndex: 'orderNumber',
+      key: 'orderNumber',
+      render: (orderNumber: string) => <strong>{orderNumber}</strong>,
+    },
+    {
+      title: 'Customer',
+      dataIndex: 'customer',
+      key: 'customer',
+      render: (customer?: Customer | null) =>
+        customer ? (
+          <>
+            <strong>{customer.email}</strong>
+            <span style={{ color: '#888' }}>
+              {` (${customer.firstName ?? ''} ${customer.lastName ?? ''})`}
+            </span>
+          </>
+        ) : (
+          <span>Guest</span>
+        ),
+    },
+    {
+      title: 'Total Price',
+      dataIndex: 'totalPrice',
+      key: 'totalPrice',
+      render: (value: number) => <Tag color="blue">${value?.toFixed(2)}</Tag>,
+      sorter: (a: Order, b: Order) => a.totalPrice - b.totalPrice,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => <Tag color="orange">{status}</Tag>,
+    },
+    {
+      title: 'Date',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      render: (date: string) =>
+        date ? new Date(date).toLocaleString() : '',
+    },
+  ];
+
+  return (
+    <Card title="Recent Orders">
+      <Table<Order>
+        columns={columns}
+        dataSource={data?.recentOrders || []}
+        rowKey="id"
+        loading={loading}
+        pagination={false}
+        bordered
+      />
+    </Card>
+  );
+};
+
+export default OrdersTab;

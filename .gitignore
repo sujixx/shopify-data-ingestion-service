@@ -1,5 +1,36 @@
-node_modules/
-.env
+# ── OS cruft
 .DS_Store
+Thumbs.db
+
+# ── Logs
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ── Environment secrets (never commit)
+.env
+.env.*.local
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# ── Node modules (both apps)
+node_modules/
+**/node_modules/
+
+# ── Build artifacts
+frontend/build/
+coverage/
+dist/
+
+# ── Tooling / editor folders
+.vscode/
+.idea/
+.vercel/
+.railway/
+
+# ── Local scratch folder you don't want in git
 retail-insights-app/
