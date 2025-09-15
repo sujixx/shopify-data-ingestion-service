@@ -1,50 +1,81 @@
-import React from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import SummaryCards from './SummaryCards';
 import OrdersChart from './OrdersChart';
 import TopCustomers from './TopCustomers';
-import StoreConnection from '../Store';
+import StoreConnection from '../Store/StoreConnection';
+import AIInsightsPanel from './AIInsightsPanel';
+import { dashboardAPI, shopifyAPI } from '../../services/api';
 import './Dashboard.css';
 
-export default function Dashboard() {
-  // Get auth context (can be null briefly while the app boots)
-  const auth = useAuth();
+function AutoBackfillOnce() {
+  const [ran, setRan] = useState(false);
 
-  // 1) Safety: if context isn't mounted yet, send to login (or show a loader)
-  if (!auth) return <Navigate to="/login" replace />;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Only in browser, and only once per device
+        if (typeof window === 'undefined') return;
+        if (localStorage.getItem('syncedOnce') === 'true') return;
 
-  const { currentUser, logout, ready, isAuthenticated } = auth;
+        const res = await dashboardAPI.getSummary();
+        const s = res?.data || res || {};
+        const totals =
+          Number(s?.overview?.totalCustomers || 0) +
+          Number(s?.overview?.totalOrders || 0) +
+          Number(s?.overview?.totalRevenue || 0);
 
-  // 2) While AuthProvider is initializing (reading localStorage), show a loader
-  if (!ready) {
-    return (
-      <div className="dashboard">
-        <div className="loading">Loading…</div>
-      </div>
-    );
-  }
+        if (totals === 0) {
+          await shopifyAPI.syncData(['customers', 'orders', 'products']);
+        }
+        localStorage.setItem('syncedOnce', 'true');
+        if (!cancelled) setRan(true);
+      } catch {
+        // stay silent; dashboard still works
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // 3) If user isn’t authenticated, redirect to login
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
+  return ran ? null : null;
+}
 
-  // 4) (Optional extra check) If there’s no token in localStorage, redirect
+function Dashboard() {
+  // Safe guard: if context not ready or token missing, send to login
+  const auth = useAuth?.() || null;
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!auth || !token) return <Navigate to="/login" replace />;
 
-  // 5) Normal render once authenticated
+  const { currentUser, logout } = auth;
+
+  // Theme auto-load
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('theme');
+      if (saved === 'dark') document.body.classList.add('dark');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const isDark = document.body.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  };
+
   return (
     <div className="dashboard">
+      <AutoBackfillOnce />
+
       <header className="dashboard-header">
-        <div className="container">
+        <div className="container header-inner">
           <h1>Shopify Insights Dashboard</h1>
           <div className="user-info">
             <span>Welcome, {currentUser?.email}</span>
-            <button onClick={logout} className="logout-btn">Logout</button>
+            <button onClick={toggleTheme} className="btn btn-secondary">Theme</button>
+            <button onClick={logout} className="btn btn-secondary">Logout</button>
           </div>
         </div>
       </header>
@@ -53,6 +84,10 @@ export default function Dashboard() {
         <div className="container">
           <StoreConnection />
           <SummaryCards />
+
+          {/* New AI-style panel */}
+          <AIInsightsPanel />
+
           <div className="charts-row">
             <div className="chart-container">
               <OrdersChart />
@@ -66,3 +101,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
+export default Dashboard;

@@ -1,167 +1,156 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || ''; // "" => same-origin (Vercel routes proxy)
-const api = axios.create({ baseURL: API_BASE_URL });
+const API_BASE_URL = process.env.REACT_APP_API_URL;
 
-// Attach token automatically
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
+// Create axios instance with base configuration
+const api = axios.create({
+  baseURL: API_BASE_URL,
 });
 
-// On 401, clear and bounce to /login
+// Request interceptor to add auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor to handle auth errors
 api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err?.response?.status === 401) {
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
+      // Don’t hard crash during build; only redirect in browser
+      if (typeof window !== 'undefined') window.location.href = '/login';
     }
-    return Promise.reject(err);
+    return Promise.reject(error);
   }
 );
 
-// -------------------- helpers --------------------
-const toDateStr = (d) => {
-  try {
-    const x = new Date(d);
-    if (Number.isNaN(x.getTime())) return null;
-    return x.toISOString().slice(0, 10);
-  } catch {
-    return null;
-  }
+// ---- Helpers (fallback calculations) ----
+const toISODate = (d) => {
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return null;
+  const z = new Date(Date.UTC(x.getFullYear(), x.getMonth(), x.getDate()));
+  return z.toISOString().slice(0, 10);
 };
 
-function groupOrdersByDate(orders, startDate, endDate) {
-  const map = new Map();
-  (orders || []).forEach((o) => {
-    const dRaw = o.date || o.processedAt || o.createdAt || o.created_at;
-    const date = toDateStr(dRaw);
+const groupOrdersByDay = (orders = [], startDate, endDate) => {
+  const counts = new Map();
+  orders.forEach((o) => {
+    const date =
+      toISODate(o.date || o.processedAt || o.createdAt || o.created_at) || null;
     if (!date) return;
     if (startDate && date < startDate) return;
     if (endDate && date > endDate) return;
-    map.set(date, (map.get(date) || 0) + 1);
+    counts.set(date, (counts.get(date) || 0) + 1);
   });
-  return Array.from(map.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => ({ date, count }));
-}
+  return Array.from(counts.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+};
 
-function normalizeSummary(root) {
-  // root is either {success, data:{...}} or {...} directly
-  const s = root?.data ?? root ?? {};
+const topCustomersFromOrders = (orders = [], limit = 5) => {
+  const byEmail = new Map();
+  orders.forEach((o) => {
+    const email =
+      o?.customer?.email || o?.email || o?.customerEmail || 'guest@unknown';
+    const firstName = o?.customer?.firstName || o?.customer?.first_name || '';
+    const lastName = o?.customer?.lastName || o?.customer?.last_name || '';
+    const amount = Number(o?.totalPrice ?? o?.total_price ?? 0) || 0;
 
-  // Overview/totals
-  const ov = s.overview || {};
-  const totalCustomers =
-    ov.totalCustomers ?? ov.total_customers ?? ov.customers ?? 0;
-  const totalOrders =
-    ov.totalOrders ?? ov.total_orders ?? ov.orders ?? 0;
-  const totalRevenue =
-    Number(ov.totalRevenue ?? ov.total_revenue ?? ov.revenue ?? 0) || 0;
+    const curr = byEmail.get(email) || {
+      id: email,
+      email,
+      name: [firstName, lastName].filter(Boolean).join(' ').trim() || email,
+      totalSpent: 0,
+      ordersCount: 0,
+      lastOrderDate: null,
+    };
+    curr.totalSpent += amount;
+    curr.ordersCount += 1;
+    const d = toISODate(o.date || o.processedAt || o.createdAt || o.created_at);
+    if (d && (!curr.lastOrderDate || d > curr.lastOrderDate)) curr.lastOrderDate = d;
+    byEmail.set(email, curr);
+  });
 
-  // Try to compute AOV if not provided
-  const aovFromTotals =
-    totalOrders > 0 ? totalRevenue / totalOrders : 0;
-  const avgOrderValue =
-    Number(ov.avgOrderValue ?? ov.avg_order_value ?? aovFromTotals) || 0;
+  return Array.from(byEmail.values())
+    .sort((a, b) => b.totalSpent - a.totalSpent)
+    .slice(0, limit);
+};
 
-  // Lists provided by backend
-  const recentOrders =
-    s.recentOrders ?? s.recent_orders ?? s.orders ?? [];
-  const topCustomersRaw =
-    s.topCustomers ?? s.top_customers ?? [];
-
-  // dailyRevenue might be [{date, revenue, orders?}] (your backend shows it)
-  const dailyRevenue =
-    s.dailyRevenue ?? s.daily_revenue ?? [];
-
-  // Normalize top customers
-  const topCustomers = (topCustomersRaw || []).map((c) => ({
-    id: c.id ?? c.email ?? c.shopifyCustomerId ?? c.shopify_customer_id,
-    name:
-      c.name ||
-      [c.firstName ?? c.first_name, c.lastName ?? c.last_name].filter(Boolean).join(' ') ||
-      c.email,
-    email: c.email,
-    totalSpent: Number(c.totalSpent ?? c.total_spent ?? c.spent ?? 0) || 0,
-  }));
-
-  // Prefer orders count embedded in dailyRevenue; else derive from recentOrders
-  let ordersByDate = [];
-  if (Array.isArray(dailyRevenue) && dailyRevenue.length) {
-    ordersByDate = dailyRevenue.map((r) => ({
-      date: r.date || r.day || toDateStr(r.timestamp),
-      count:
-        r.orders ??
-        r.count ??
-        0,
-    })).filter(x => x.date);
-  }
-  if (!ordersByDate.length) {
-    ordersByDate = groupOrdersByDate(recentOrders);
-  }
-
-  return {
-    totalCustomers,
-    totalOrders,
-    totalRevenue,
-    avgOrderValue,
-    ordersByDate,     // [{date, count}]
-    topCustomers,     // [{id,name,email,totalSpent}]
-    recentOrders,     // keep raw for any future component
-  };
-}
-
-// -------------------- exported APIs --------------------
 export const authAPI = {
   login: (email, password) => api.post('/api/auth/login', { email, password }),
 };
 
 export const dashboardAPI = {
-  // Always normalize so components can read response.data.* consistently
+  /**
+   * Primary source of truth. Your backend already provides it.
+   * This function normalizes shape whether backend returns {success, data} or the object directly.
+   */
   getSummary: async () => {
     const res = await api.get('/api/analytics/dashboard');
-    const normalized = normalizeSummary(res.data);
-    return { data: normalized }; // keep axios-like shape for existing components
+    const payload = res?.data;
+    const normalized = payload?.data ?? payload ?? {};
+    // Ensure keys exist so UI never crashes
+    return {
+      data: {
+        overview: normalized.overview || {
+          totalCustomers: 0,
+          totalOrders: 0,
+          totalRevenue: 0,
+          avgOrderValue: 0,
+        },
+        today: normalized.today || { orders: 0, revenue: 0 },
+        recentOrders: normalized.recentOrders || [],
+        topCustomers: normalized.topCustomers || [],
+        dailyRevenue: normalized.dailyRevenue || [], // [{date, revenue, orderCount}]
+        ordersByDate: normalized.ordersByDate || [], // if you have it
+      },
+      success: true,
+    };
   },
 
-  // Try dedicated endpoint; on 4xx/5xx fallback to normalized summary
+  /**
+   * Resilient Orders By Date:
+   * 1) Try dedicated endpoint.
+   * 2) If 404/501/etc, derive from recentOrders in the summary.
+   */
   getOrdersByDate: async (startDate, endDate) => {
     try {
       const res = await api.get(
-        `/api/analytics/orders-by-date?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`
+        `/api/analytics/orders-by-date?startDate=${startDate}&endDate=${endDate}`
       );
-      return res;
-    } catch (error) {
-      const status = error?.response?.status;
-      if (!status || [404, 400, 501, 500].includes(status)) {
-        const summary = await dashboardAPI.getSummary();
-        // Filter the normalized series by date range
-        const filtered = (summary.data.ordersByDate || []).filter((p) => {
-          return (!startDate || p.date >= startDate) &&
-                 (!endDate || p.date <= endDate);
-        });
-        return { data: filtered };
-      }
-      throw error;
+      return res.data;
+    } catch {
+      // derive from summary
+      const s = await dashboardAPI.getSummary();
+      const derived = groupOrdersByDay(s.data.recentOrders, startDate, endDate);
+      return derived;
     }
   },
 
+  /**
+   * Resilient Top Customers:
+   * 1) Try dedicated endpoint.
+   * 2) If not present, use summary.topCustomers.
+   * 3) If still missing, derive from recentOrders.
+   */
   getTopCustomers: async () => {
     try {
-      return await api.get('/api/analytics/top-customers');
-    } catch (error) {
-      const status = error?.response?.status;
-      if (!status || [404, 400, 501, 500].includes(status)) {
-        const summary = await dashboardAPI.getSummary();
-        return { data: summary.data.topCustomers || [] };
+      const res = await api.get('/api/analytics/top-customers');
+      return res.data;
+    } catch {
+      const s = await dashboardAPI.getSummary();
+      if (Array.isArray(s.data.topCustomers) && s.data.topCustomers.length) {
+        return s.data.topCustomers;
       }
-      throw error;
+      // derive from orders
+      return topCustomersFromOrders(s.data.recentOrders, 5);
     }
   },
 };
