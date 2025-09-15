@@ -7,14 +7,7 @@ import "./App.css";
 
 function FullScreenLoader() {
   return (
-    <div style={{
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontSize: 16,
-      color: "#555"
-    }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#555" }}>
       Loading…
     </div>
   );
@@ -22,7 +15,6 @@ function FullScreenLoader() {
 
 function ProtectedRoute({ children }) {
   const auth = useAuth();
-  // Safety: if context hasn't mounted yet, render a loader (prevents white screen)
   if (!auth || !auth.ready) return <FullScreenLoader />;
   return auth.isAuthenticated ? children : <Navigate to="/login" replace />;
 }
@@ -33,14 +25,7 @@ export default function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

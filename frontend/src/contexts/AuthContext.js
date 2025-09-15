@@ -9,8 +9,7 @@ export function AuthProvider({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Same-origin axios; Vercel proxy handles /api/*
-    const base = process.env.REACT_APP_API_URL || "";
+    const base = process.env.REACT_APP_API_URL || ""; // same-origin (Vercel routes proxy)
     axios.defaults.baseURL = base;
 
     const token = localStorage.getItem("token");
@@ -24,7 +23,7 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     try {
-      const base = process.env.REACT_APP_API_URL || ""; // same-origin default
+      const base = process.env.REACT_APP_API_URL || "";
       const { data } = await axios.post(`${base}/api/auth/login`, { email, password });
       const { token, user } = data || {};
       if (token && user) {

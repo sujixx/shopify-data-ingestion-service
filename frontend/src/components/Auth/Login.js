@@ -1,34 +1,42 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import './Login.css';
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
+import "./Login.css";
 
-function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+export default function Login() {
+  const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // If already authenticated, don’t show login — go to dashboard
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    setError("");
+
     if (!email || !password) {
-      setError('Please enter both email and password');
+      setError("Please enter both email and password");
       return;
     }
 
     setLoading(true);
-    setError('');
-    
-    // Simple mock login for testing
-    setTimeout(() => {
-      if (email === 'admin@demo.com' && password === 'password123') {
-        navigate('/dashboard');
-      } else {
-        setError('Invalid credentials');
-      }
-      setLoading(false);
-    }, 1000);
+    const res = await login(email, password);
+    setLoading(false);
+
+    if (res?.success) {
+      navigate("/dashboard", { replace: true });
+    } else {
+      setError(res?.error || "Login failed");
+    }
   };
 
   return (
@@ -36,9 +44,9 @@ function Login() {
       <div className="login-card">
         <h2>Shopify Insights Dashboard</h2>
         <p>Sign in to access your store analytics</p>
-        
+
         {error && <div className="error-message">{error}</div>}
-        
+
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="email">Email Address</label>
@@ -51,7 +59,7 @@ function Login() {
               required
             />
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="password">Password</label>
             <input
@@ -63,16 +71,12 @@ function Login() {
               required
             />
           </div>
-          
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="login-button"
-          >
-            {loading ? 'Logging in...' : 'Login'}
+
+          <button type="submit" disabled={loading} className="login-button">
+            {loading ? "Logging in..." : "Login"}
           </button>
         </form>
-        
+
         <div className="demo-credentials">
           <p>Demo credentials:</p>
           <p>Email: admin@demo.com</p>
@@ -82,5 +86,3 @@ function Login() {
     </div>
   );
 }
-
-export default Login;
