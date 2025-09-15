@@ -4,16 +4,24 @@ import { useAuth } from '../../contexts/AuthContext';
 import SummaryCards from './SummaryCards';
 import OrdersChart from './OrdersChart';
 import TopCustomers from './TopCustomers';
+// If you DIDN'T create components/Store/index.js, switch this to:
+//   import StoreConnection from '../Store/StoreConnection';
 import StoreConnection from '../Store';
 import './Dashboard.css';
 
 function Dashboard() {
   const auth = useAuth();
-  if (!auth) return null; // context not ready yet; App's ProtectedRoute shows loader
-  const { currentUser, logout } = auth;
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-  if (!token) return <Navigate to="/login" replace />;
+  // Belt & suspenders: if context isn't available yet OR not authenticated,
+  // send to /login (prevents the "cannot destructure currentUser" crash and blank screens)
+  const hasToken =
+    typeof window !== 'undefined' && !!localStorage.getItem('token');
+
+  if (!auth || !auth.isAuthenticated || !hasToken) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const { currentUser, logout } = auth;
 
   return (
     <div className="dashboard">
