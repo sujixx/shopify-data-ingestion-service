@@ -1,111 +1,111 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AreaChart,
+  Area,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   Legend,
-  Bar,
-  Line,
-  ComposedChart,
+  ResponsiveContainer,
 } from 'recharts';
 import { dashboardAPI } from '../../services/api';
-import { format, subDays } from 'date-fns';
+import { format, subDays, parseISO, eachDayOfInterval } from 'date-fns';
 import './OrdersChart.css';
 
-// Helpers
-const fmt = (d) => format(new Date(d), 'yyyy-MM-dd');
-const formatINR = (n) =>
-  (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const asYMD = (d) => format(new Date(d), 'yyyy-MM-dd');
+const toDate = (ymd) => new Date(`${ymd}T00:00:00`);
 
-function fillDates(startDate, endDate, seed = {}) {
-  const out = {};
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const key = fmt(d);
-    out[key] = { date: key, orderCount: 0, revenue: 0, ...(seed[key] || {}) };
-  }
-  return out;
-}
-
-function OrdersChart() {
+export default function OrdersChart() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [raw, setRaw] = useState(null);
   const [dateRange, setDateRange] = useState({
     startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd'),
   });
-  const [rawDashboard, setRawDashboard] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
   useEffect(() => {
-    let isMounted = true;
-    const run = async () => {
-      setLoading(true);
-      setError('');
+    let mounted = true;
+    (async () => {
       try {
-        // Single source of truth: dashboard endpoint
+        setLoading(true);
+        setError('');
         const res = await dashboardAPI.getSummary();
-        if (!isMounted) return;
-        setRawDashboard(res.data || res);
-      } catch (err) {
-        if (!isMounted) return;
-        setError('Failed to fetch orders data');
-        console.error(err);
+        if (mounted) setRaw(res.data || res); // support {success,data} or plain
+      } catch (e) {
+        console.error(e);
+        if (mounted) setError('Failed to fetch dashboard data');
       } finally {
-        if (isMounted) setLoading(false);
+        if (mounted) setLoading(false);
       }
+    })();
+    return () => {
+      mounted = false;
     };
-    run();
-    return () => { isMounted = false; };
-  }, []);
+  }, []); // fetch once; we filter client-side by date range
 
-  const data = useMemo(() => {
-    if (!rawDashboard) return [];
+  const series = useMemo(() => {
+    if (!raw) return [];
 
-    const { dailyRevenue, recentOrders } = rawDashboard;
+    // Preferred: backend-provided dailyRevenue
+    const backendDaily = Array.isArray(raw.dailyRevenue) ? raw.dailyRevenue : [];
 
-    if (
-      Array.isArray(dailyRevenue) &&
-      dailyRevenue.length &&
-      dateRange.startDate <= dateRange.endDate
-    ) {
-      // Use backend series if present
-      const base = dailyRevenue.reduce((acc, row) => {
-        const key = fmt(row.date || row.day || row.ds || row.Date || row.D);
-        acc[key] = {
-          date: key,
-          orderCount: Number(row.orderCount || row.count || row.orders || 0),
-          revenue: Number(row.revenue || row.total || 0),
-        };
-        return acc;
-      }, {});
-      const filled = fillDates(dateRange.startDate, dateRange.endDate, base);
-      return Object.values(filled);
-    }
+    // Fallback: bucket recent orders by day
+    const fallbackDaily = (() => {
+      const orders = Array.isArray(raw.recentOrders) ? raw.recentOrders : [];
+      const map = new Map();
+      for (const o of orders) {
+        const when = o.processedAt || o.createdAt || o.updatedAt;
+        if (!when) continue;
+        const day = asYMD(when);
+        const prev = map.get(day) || { revenue: 0, orderCount: 0 };
+        map.set(day, {
+          revenue: prev.revenue + (Number(o.totalPrice) || 0),
+          orderCount: prev.orderCount + 1,
+        });
+      }
+      return Array.from(map.entries()).map(([date, v]) => ({
+        date,
+        revenue: v.revenue,
+        orderCount: v.orderCount,
+      }));
+    })();
 
-    // Fallback: derive from recentOrders
-    const grouped = (recentOrders || []).reduce((acc, o) => {
-      const key = fmt(o.createdAt || o.processedAt || o.date);
-      if (!acc[key]) acc[key] = { date: key, orderCount: 0, revenue: 0 };
-      acc[key].orderCount += 1;
-      acc[key].revenue += Number(o.totalPrice || o.total || 0);
-      return acc;
-    }, {});
-    const filled = fillDates(dateRange.startDate, dateRange.endDate, grouped);
-    return Object.values(filled);
-  }, [rawDashboard, dateRange]);
+    // Normalize to {date: ymd, revenue, orderCount}
+    const normalizedBackend = backendDaily.map((d) => ({
+      date: asYMD(d.date || d.day || d.timestamp || new Date()),
+      revenue: Number(d.revenue) || 0,
+      orderCount: Number(d.orderCount) || 0,
+    }));
 
-  const onDateChange = (e) => {
+    // Prefer backend if it has at least one non-zero day; else fallback
+    const source =
+      normalizedBackend.some((d) => d.revenue > 0 || d.orderCount > 0)
+        ? normalizedBackend
+        : fallbackDaily;
+
+    // Fill gaps across selected date range
+    const start = toDate(dateRange.startDate);
+    const end = toDate(dateRange.endDate);
+    const byDay = new Map(source.map((d) => [d.date, d]));
+
+    const allDays = eachDayOfInterval({ start, end }).map((d) => asYMD(d));
+    return allDays.map((day) => ({
+      date: day,
+      revenue: byDay.get(day)?.revenue || 0,
+      orderCount: byDay.get(day)?.orderCount || 0,
+    }));
+  }, [raw, dateRange]);
+
+  const handleDateChange = (e) => {
     const { name, value } = e.target;
     setDateRange((prev) => ({ ...prev, [name]: value }));
   };
 
-  if (loading) return <div className="orders-chart loading">Loading...</div>;
+  if (loading) return <div className="orders-chart loading">Loading…</div>;
   if (error) return <div className="orders-chart error">{error}</div>;
-
-  const currencySymbol = '₹';
 
   return (
     <div className="orders-chart">
@@ -117,7 +117,7 @@ function OrdersChart() {
             name="startDate"
             value={dateRange.startDate}
             max={dateRange.endDate}
-            onChange={onDateChange}
+            onChange={handleDateChange}
           />
           <span>to</span>
           <input
@@ -125,36 +125,47 @@ function OrdersChart() {
             name="endDate"
             value={dateRange.endDate}
             min={dateRange.startDate}
-            onChange={onDateChange}
+            onChange={handleDateChange}
           />
         </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={320}>
-        <ComposedChart data={data}>
+      <ResponsiveContainer width="100%" height={300}>
+        <AreaChart data={series}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="date" />
-          <YAxis yAxisId="left" label={{ value: 'Orders', angle: -90, position: 'insideLeft' }} />
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            label={{ value: 'Revenue (₹)', angle: 90, position: 'insideRight' }}
-          />
+          <XAxis dataKey="date" tickFormatter={(d) => format(parseISO(d), 'MM/dd')} />
+          <YAxis />
           <Tooltip
-            formatter={(value, name) => {
-              if (name.toLowerCase().includes('revenue')) {
-                return [`${currencySymbol}${formatINR(value)}`, 'Revenue'];
-              }
-              return [value, 'Orders'];
-            }}
+            formatter={(val, key) =>
+              key === 'revenue'
+                ? new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                  }).format(val || 0)
+                : val
+            }
+            labelFormatter={(d) => format(parseISO(d), 'MMM dd, yyyy')}
           />
           <Legend />
-          <Bar yAxisId="left" dataKey="orderCount" name="Orders" />
-          <Line yAxisId="right" type="monotone" dataKey="revenue" name="Revenue" dot={false} />
-        </ComposedChart>
+          <Area
+            type="monotone"
+            dataKey="revenue"
+            name="Revenue (USD)"
+            stroke="#4a90e2"
+            fill="#e6f2ff"
+            strokeWidth={2}
+            activeDot={{ r: 5 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="orderCount"
+            name="Orders"
+            stroke="#7d4ae2"
+            strokeWidth={2}
+            dot={false}
+          />
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );
 }
-
-export default OrdersChart;
