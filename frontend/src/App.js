@@ -7,49 +7,28 @@ import './App.css';
 
 function FullScreenLoader() {
   return (
-    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div className="loading">Loading…</div>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', color: '#666' }}>
+      Loading…
     </div>
-  );
+    );
 }
 
-function ProtectedRoute({ children }) {
-  const { loading, isAuthenticated } = useAuth();
-  if (loading) return <FullScreenLoader />;
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
-}
-
-function PublicOnlyRoute({ children }) {
-  const { loading, isAuthenticated } = useAuth();
-  if (loading) return <FullScreenLoader />;
-  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children;
+function ProtectedRoute({ element }) {
+  const auth = useAuth();
+  // If context is not ready yet, show loader (prevents redirect loops/glitches)
+  if (!auth || auth.loading) return <FullScreenLoader />;
+  return auth.isAuthenticated ? element : <Navigate to="/login" replace />;
 }
 
 export default function App() {
   return (
     <AuthProvider>
       <Router>
-        <div className="App">
-          <Routes>
-            <Route
-              path="/login"
-              element={
-                <PublicOnlyRoute>
-                  <Login />
-                </PublicOnlyRoute>
-              }
-            />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </div>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
       </Router>
     </AuthProvider>
   );

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import { authAPI, getApiBaseUrl } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -11,45 +12,38 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Hydrate auth from localStorage exactly once
+  // Hydrate at app start
   useEffect(() => {
     try {
       const token = localStorage.getItem('token');
       const userRaw = localStorage.getItem('user');
-      if (token) {
-        axios.defaults.baseURL = process.env.REACT_APP_API_URL;
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      }
-      if (userRaw) {
-        setCurrentUser(JSON.parse(userRaw));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
+      axios.defaults.baseURL = getApiBaseUrl();
+      if (token) axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      if (userRaw) setCurrentUser(JSON.parse(userRaw));
+    } catch {}
+    setLoading(false);
   }, []);
 
   const login = async (email, password) => {
     try {
-      const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/auth/login`, {
-        email,
-        password,
-      });
-      const { token, user } = res.data;
+      const { data } = await authAPI.login(email, password);
+      const { token, user } = data;
 
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-      axios.defaults.baseURL = process.env.REACT_APP_API_URL;
+
+      axios.defaults.baseURL = getApiBaseUrl();
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
       setCurrentUser(user);
       return { success: true };
     } catch (err) {
-      return {
-        success: false,
-        error: err.response?.data?.message || 'Login failed',
-      };
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Login failed (network/CORS/env?)';
+      console.error('Login error:', err);
+      return { success: false, error: msg };
     }
   };
 
@@ -66,7 +60,7 @@ export function AuthProvider({ children }) {
       login,
       logout,
       loading,
-      isAuthenticated: !!currentUser && !!localStorage.getItem('token'),
+      isAuthenticated: !!localStorage.getItem('token'),
     }),
     [currentUser, loading]
   );
