@@ -1,73 +1,74 @@
-1) Project Overview
+# Shopify Analytics Dashboard
 
-A React (Create React App) dashboard that authenticates users, connects a Shopify store, ingests data, and visualizes business KPIs:
+A React-based dashboard that authenticates users, connects to Shopify stores, ingests data, and visualizes business KPIs including totals, daily revenue charts, and top customers.
 
-Totals: Customers, Orders, Revenue, AOV
+## 🚀 Features
 
-Orders by Day: Date-range chart
+- **Authentication**: JWT-based user authentication
+- **Shopify Integration**: OAuth flow with one-click sync/backfill
+- **Analytics Dashboard**: 
+  - Overview metrics (Customers, Orders, Revenue, AOV)
+  - Orders by day chart with date range selection
+  - Top 5 customers by spend
+- **Multi-tenant Architecture**: Each user belongs to a tenant with Shopify store connection
+- **Responsive Design**: Built with React and Recharts for data visualization
 
-Top 5 Customers: By spend
+## 🏗️ Architecture
 
-Store Connect: Shopify OAuth flow + one-click sync/backfill
+```
+┌─────────────────────────────┐           ┌──────────────────────────────┐
+│           Browser           │  HTTPS    │            Vercel            │
+│  React Dashboard (CRA)      ├──────────►│  Static hosting + rewrites   │
+│  AuthContext + Axios        │           │  /api/* -> Railway backend   │
+└──────────────┬──────────────┘           └──────────────┬───────────────┘
+               │                                         │
+               │ JWT (Bearer)                            │ HTTPS /api/*
+               │                                         ▼
+┌──────────────┴────────────────┐        ┌──────────────────────────────┐
+│        Railway (Node/Express) │        │         Shopify APIs         │
+│  /api/auth, /api/analytics,   │◄──────►│ OAuth, Orders, Customers,    │
+│  /api/shopify/...             │        │ Products, Webhooks           │
+│  Prisma ORM + DB              │        └──────────────────────────────┘
+└───────────────────────────────┘
+```
 
-The app is resilient to backend shape: the frontend reads /api/analytics/dashboard as the single source of truth and derives chart/table data if dedicated endpoints are missing.
+## 🛠️ Tech Stack
 
-2) Architecture (High-Level)
-+-----------------------------+           +------------------------------+
-|           Browser           |  HTTPS    |            Vercel            |
-|  React Dashboard (CRA)      +---------->+  Static hosting + rewrites   |
-|  AuthContext + Axios        |           |  /api/* -> Railway backend   |
-+--------------+--------------+           +--------------+---------------+
-               ^                                             |
-               | JWT (Bearer)                                | HTTPS /api/*
-               |                                             v
-+--------------+--------------------+        +------------------------------+
-|        Railway (Node/Express)     |        |         Shopify APIs         |
-|  /api/auth, /api/analytics,       |        | OAuth, Orders, Customers,    |
-|  /api/shopify/...                 |<------>+ Products, Webhooks           |
-|  Prisma ORM + DB (MySQL/Postgres) |        +------------------------------+
-+-----------------------------------+
+**Frontend:**
+- React 18 (Create React App)
+- Recharts for data visualization
+- React Router for navigation
+- Axios for API calls
+- date-fns for date handling
 
+**Backend:**
+- Node.js with Express
+- Prisma ORM
+- JWT authentication
+- Shopify OAuth integration
 
-Vercel serves the React app and proxies /api/* to Railway via vercel.json rewrites (no CORS headache on the browser).
+**Infrastructure:**
+- Vercel (frontend hosting)
+- Railway (backend + database)
 
-Railway hosts an Express API (JWT auth). Prisma talks to your SQL database.
+## ⚙️ Setup
 
-Shopify is the data source: OAuth to get tokens, periodic/webhook-based ingestion.
+### Prerequisites
 
-3) Assumptions
+- Node.js 16+
+- Shopify Partner account and app
+- Database (MySQL/PostgreSQL)
 
-Authentication: JWT via /api/auth/login (email/password).
+### Backend Setup (Railway/Local)
 
-Multi-tenant: Each user belongs to a tenant. A tenant can have a shopifyDomain.
-
-Single source of truth: Frontend primarily calls /api/analytics/dashboard.
-
-Currency: Shopify store currency (e.g. USD). The frontend formats numbers using Intl.NumberFormat.
-
-DB: SQL with Prisma models for User, Tenant, Customer, Order, OrderItem, Product.
-
-Shopify scopes: at least read_orders, read_customers, read_products, write_webhooks.
-
-4) Tech Stack
-
-Frontend: React 18 (CRA), Recharts, React Router, Axios, date-fns
-
-Backend: Node.js (Express), Prisma ORM, JWT, Shopify OAuth, Webhooks
-
-Infra: Vercel (frontend), Railway (backend + DB)
-
-5) Setup (Local)
-5.1 Backend (Railway/local)
-
-Clone the repo and navigate to backend:
-
+1. Navigate to backend directory:
+```bash
 cd backend
 npm install
+```
 
-
-Create .env:
-
+2. Create `.env` file:
+```env
 PORT=8080
 JWT_SECRET=supersecret
 DATABASE_URL=<your_database_url>
@@ -78,35 +79,36 @@ SHOPIFY_API_KEY=<from-partner-dashboard>
 SHOPIFY_API_SECRET=<from-partner-dashboard>
 SHOPIFY_SCOPES=read_products,read_orders,read_customers,write_webhooks
 SHOPIFY_APP_URL=https://<your-backend-host>/api/shopify
+```
 
-
-Prisma:
-
+3. Setup Prisma:
+```bash
 npx prisma migrate deploy
 npx prisma generate
+```
 
-
-Run:
-
+4. Start the server:
+```bash
 npm run start
 # or npm run dev
+```
 
-5.2 Frontend (Vercel/local)
+### Frontend Setup (Vercel/Local)
 
-Navigate to frontend:
-
+1. Navigate to frontend directory:
+```bash
 cd frontend
 npm install
+```
 
-
-Create .env:
-
+2. Create `.env` file:
+```env
 REACT_APP_API_URL=https://<your-backend-host>
 REACT_APP_SHOPIFY_APP_URL=https://<your-backend-host>/api/shopify
+```
 
-
-vercel.json (in frontend/):
-
+3. Create `vercel.json` in frontend directory:
+```json
 {
   "version": 2,
   "builds": [
@@ -117,223 +119,156 @@ vercel.json (in frontend/):
     { "source": "/(.*)", "destination": "/" }
   ]
 }
+```
 
-
-Run locally:
-
+4. Start the development server:
+```bash
 npm start
+```
 
-6) Deployment
-6.1 Railway (Backend)
+## 🚀 Deployment
 
-Add all environment variables from .env.
+### Railway (Backend)
 
-Expose the service; note the public URL as <your-backend-host>.
+1. Connect your repository to Railway
+2. Add all environment variables from your `.env` file
+3. Deploy and note the public URL as `<your-backend-host>`
 
-6.2 Vercel (Frontend)
+### Vercel (Frontend)
 
-Project root: frontend/
+1. Connect your repository to Vercel
+2. Set project root to `frontend/`
+3. Add environment variables:
+   - `REACT_APP_API_URL=https://<your-backend-host>`
+   - `REACT_APP_SHOPIFY_APP_URL=https://<your-backend-host>/api/shopify`
+4. Build command: `npm run build`
+5. Output directory: `build`
+6. Ensure `vercel.json` is present in the frontend directory
 
-Environment Variables in Vercel:
+## 📡 API Endpoints
 
-REACT_APP_API_URL=https://<your-backend-host>
+All endpoints require `Authorization: Bearer <JWT>` unless noted.
 
-REACT_APP_SHOPIFY_APP_URL=https://<your-backend-host>/api/shopify
-
-Build command: npm run build
-
-Output directory: build
-
-Ensure vercel.json is present (rewrites, not routes).
-
-7) API Endpoints (Key)
-
-All endpoints are under /api and require Authorization: Bearer <JWT> unless noted.
-
-7.1 Auth
-
+### Authentication
+```
 POST /api/auth/login
+Body: { "email": "admin@demo.com", "password": "password123" }
+Response: { "success": true, "token": "<jwt>", "user": {...}, "tenant": {...} }
+```
 
-{ "email": "admin@demo.com", "password": "password123" }
-
-
-200 OK
-
-{ "success": true, "token": "<jwt>", "user": { "email": "admin@demo.com" }, "tenant": { "id": "..." } }
-
-7.2 Shopify
-
+### Shopify Integration
+```
 POST /api/shopify/connect
+Body: { "shopifyDomain": "your-store.myshopify.com" }
 
-{ "shopifyDomain": "your-store.myshopify.com" }
-
-
-GET /api/shopify/auth (browser redirect)
-
-GET /api/shopify/auth/callback (Shopify redirects here)
+GET /api/shopify/auth (OAuth redirect)
+GET /api/shopify/auth/callback (OAuth callback)
 
 POST /api/shopify/sync
+Body: { "resources": ["customers","orders","products"] }
+Response: { "success": true, "message": "Sample data synced" }
+```
 
-{ "resources": ["customers","orders","products"] }
-
-
-200 OK
-
-{ "success": true, "message": "Sample data synced" }
-
-7.3 Analytics
-
+### Analytics
+```
 GET /api/analytics/dashboard?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-200 OK
-
-{
+Response: {
   "success": true,
   "data": {
-    "overview": {
-      "totalCustomers": 3,
-      "totalOrders": 7,
-      "totalRevenue": 60309.97,
-      "avgOrderValue": 8615.71
-    },
-    "today": { "orders": 5, "revenue": 59405 },
-    "recentOrders": [ /* latest 10 orders with customer */ ],
-    "topCustomers": [ /* top 5 by totalSpent */ ],
-    "dailyRevenue": [
-      { "date": "2025-09-14T00:00:00.000Z", "revenue": 904.97, "orderCount": 2 },
-      { "date": "2025-09-15T00:00:00.000Z", "revenue": 59405,  "orderCount": 5 }
-    ]
+    "overview": { "totalCustomers": 3, "totalOrders": 7, ... },
+    "dailyRevenue": [...],
+    "topCustomers": [...],
+    "recentOrders": [...]
   }
 }
 
-
 GET /api/analytics/customers?page=1&limit=20&search=abc
-200 OK
-
-{ "success": true, "data": { "customers": [ ... ], "pagination": { "page":1, "limit":20, "total": 42, "pages":3 } } }
-
-
 GET /api/analytics/orders?page=1&limit=20&status=CONFIRMED
-200 OK
+```
 
-{ "success": true, "data": { "orders": [ ... ], "pagination": { ... } } }
+## 🗄️ Data Model
 
-8) Data Model (Prisma/SQL)
+### Core Models (Prisma)
 
-Tenant
+- **Tenant**: Multi-tenant organization with Shopify store
+- **User**: Authentication and tenant association
+- **Customer**: Shopify customer data with spending metrics
+- **Order**: Order data with items and customer relationship
+- **OrderItem**: Individual line items within orders
+- **Product**: Shopify product catalog
 
-id (uuid), name, shopifyDomain, createdAt
+## 🎯 Usage
 
-User
+### Happy Path Workflow
 
-id (uuid), email, passwordHash, tenantId (FK), createdAt
+1. **Login**: Authenticate with your credentials → JWT saved to localStorage
+2. **Connect Store**: Enter `your-store.myshopify.com` → OAuth flow → installation confirmation
+3. **Sync Data**: Run initial backfill to populate database:
 
-Customer
-
-id, shopifyCustomerId, email, firstName, lastName, phone, totalSpent, ordersCount, lastOrderDate, tenantId (FK), createdAt
-
-Order
-
-id, shopifyOrderId, orderNumber, email, totalPrice, currency, status, processedAt, tenantId (FK), customerId (FK|null), createdAt, updatedAt
-
-OrderItem
-
-id, orderId (FK), title, sku, quantity, price, totalPrice
-
-Product
-
-id, shopifyProductId, title, price, vendor, status, tenantId (FK)
-
-Daily Revenue is produced via a SQL GROUP BY DATE(createdAt) in /api/analytics/dashboard.
-If you switch databases (e.g., Postgres), use DATE("createdAt") / date_trunc('day', ...) accordingly.
-
-9) Using the App (Happy Path)
-
-Login with your credentials → JWT saved to localStorage.
-
-Connect Store: enter your-store.myshopify.com → OAuth → callback confirms installation.
-
-Backfill/Sync: run once to populate DB:
-
-// DevTools Console on your Vercel domain
+```javascript
+// In browser DevTools Console
 fetch('/api/shopify/sync', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token') },
+  headers: { 
+    'Content-Type': 'application/json', 
+    Authorization: 'Bearer ' + localStorage.getItem('token') 
+  },
   body: JSON.stringify({ resources: ['customers', 'orders', 'products'] })
 }).then(r=>r.json()).then(console.log);
+```
 
+4. **View Dashboard**: Analytics cards, charts, and tables update automatically
 
-Dashboard updates: cards, orders-by-day, top customers.
+## 🔧 Troubleshooting
 
-10) Troubleshooting
+### 401 Unauthorized / Blank Dashboard
+Ensure you're logged in. Clear stale authentication:
+```javascript
+localStorage.removeItem('token');
+localStorage.removeItem('user');
+location.reload();
+```
 
-401 in DevTools / blank dashboard
-Ensure you’re logged in. Clear stale auth in console:
+### CORS Issues on Vercel
+Use `rewrites` in `vercel.json` (not `routes`) so the browser only communicates with Vercel, which forwards requests to Railway.
 
-localStorage.removeItem('token'); localStorage.removeItem('user'); location.reload();
-
-
-CORS on Vercel
-Use rewrites in vercel.json so the browser only talks to Vercel; Vercel forwards to Railway. Don’t use routes + rewrites together.
-
-Manifest 401
-Happens if your backend intercepts /manifest.json. The React app’s manifest is served from Vercel root; do not proxy it. Keep the second rewrite:
-
+### Manifest 401 Errors
+Ensure your backend doesn't intercept `/manifest.json`. Keep the catch-all rewrite:
+```json
 { "source": "/(.*)", "destination": "/" }
+```
 
+## 🚀 Production Considerations
 
-Case-sensitivity / imports
-Use barrel files (index.js) and import folders:
-import Dashboard from './components/Dashboard';
+### Next Steps to Productionize
 
-ESLint hook errors in CI
-Don’t call hooks conditionally; avoid early returns before hooks. We fixed Dashboard to guard auth before using hooks or via the ProtectedRoute.
+- **Webhooks**: Implement real-time webhook-driven data ingestion
+- **Job Queues**: Add BullMQ for background processing and rate limiting
+- **Observability**: Structured logging, metrics, error tracking (Sentry)
+- **Security**: RBAC, multi-tenant row-level security, key rotation
+- **Performance**: Database indexes, pagination, caching
+- **Testing**: Unit and integration tests for analytics aggregations
 
-11) Next Steps to Productionize
+### Current Limitations
 
-Webhooks & Sync: Make ingestion fully webhook-driven with retries & idempotency.
+- **Derived Fields**: Customer totals may require recomputation after backfills
+- **Database Portability**: SQL date functions differ across engines
+- **Currency**: Single currency support (store default)
+- **Sample Data**: Demo data may cause metric inconsistencies
 
-Jobs: Queue (BullMQ) for backfills; rate-limit Shopify API calls.
+## 🎬 Quick Demo Script (7 minutes)
 
-Observability: Structured logs, metrics, error tracking (Sentry).
+1. **Intro** (30s): Explain goal, tech stack, multi-tenant architecture
+2. **Authentication**: Login with JWT
+3. **Store Connection**: OAuth flow demonstration
+4. **Data Sync**: Console-based backfill → dashboard refresh
+5. **Analytics**: Date range selection, customer drill-down
+6. **Wrap-up**: Discuss productionization roadmap
 
-RBAC & Multi-Tenant Isolation: Enforce tenant row-level security.
-
-Pagination & Indexes: Add DB indexes on tenantId, createdAt, shopify*Id.
-
-Secrets: Use Vercel/Railway secrets managers.
-
-Tests: Unit + integration for analytics aggregations.
-
-Security: Rotate signing keys; add 2FA if needed.
-
-12) Known Limitations
-
-Derived fields: Top customers may depend on totalSpent/ordersCount consistency—recompute after backfills.
-
-Date grouping: SQL DATE(createdAt) differs across engines; adjust if you change DB.
-
-Currency: Frontend formats based on store currency; multi-currency not covered.
-
-Health route: /api/health may not exist; verify your backend.
-
-Sample data: If tenants/users point to a “demo” tenant, metrics can look mismatched—attach the user to the real tenant.
-
-13) Quick Demo Script (7 minutes)
-
-30s Intro: goal, stack, multi-tenant + Shopify.
-
-Login (JWT).
-
-Connect Store → OAuth success message.
-
-Backfill (Console) → refresh → cards update.
-
-Orders by Day date range.
-
-Top 5 Customers drill-down.
-
-Wrap-up: productionization plan & trade-offs.
-
-14) License
+## 📄 License
 
 For assignment/demo use. Adapt freely.
+
+---
+
+**Built with ❤️ using React, Express, and Shopify APIs**
