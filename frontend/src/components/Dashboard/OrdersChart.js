@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Bar, ComposedChart,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  Bar,
+  Line,
+  ComposedChart,
 } from 'recharts';
 import { dashboardAPI } from '../../services/api';
 import { format, subDays } from 'date-fns';
@@ -50,7 +58,6 @@ function OrdersChart() {
       }
     };
     run();
-    // we fetch once; chart recomputes when date changes
     return () => { isMounted = false; };
   }, []);
 
@@ -59,12 +66,12 @@ function OrdersChart() {
 
     const { dailyRevenue, recentOrders } = rawDashboard;
 
-    const start = new Date(dateRange.startDate);
-    const end = new Date(dateRange.endDate);
-    if (start > end) return [];
-
-    // 1) If backend gives a daily series, trust it and filter by range
-    if (Array.isArray(dailyRevenue) && dailyRevenue.length) {
+    if (
+      Array.isArray(dailyRevenue) &&
+      dailyRevenue.length &&
+      dateRange.startDate <= dateRange.endDate
+    ) {
+      // Use backend series if present
       const base = dailyRevenue.reduce((acc, row) => {
         const key = fmt(row.date || row.day || row.ds || row.Date || row.D);
         acc[key] = {
@@ -78,7 +85,7 @@ function OrdersChart() {
       return Object.values(filled);
     }
 
-    // 2) Fallback: derive from recentOrders (last N). We group per day and fill missing dates.
+    // Fallback: derive from recentOrders
     const grouped = (recentOrders || []).reduce((acc, o) => {
       const key = fmt(o.createdAt || o.processedAt || o.date);
       if (!acc[key]) acc[key] = { date: key, orderCount: 0, revenue: 0 };
@@ -142,9 +149,7 @@ function OrdersChart() {
             }}
           />
           <Legend />
-          {/* Orders as bars */}
           <Bar yAxisId="left" dataKey="orderCount" name="Orders" />
-          {/* Revenue as line */}
           <Line yAxisId="right" type="monotone" dataKey="revenue" name="Revenue" dot={false} />
         </ComposedChart>
       </ResponsiveContainer>
