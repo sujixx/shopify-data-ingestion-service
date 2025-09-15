@@ -1,95 +1,152 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Bar, ComposedChart,
+} from 'recharts';
 import { dashboardAPI } from '../../services/api';
-import { format, parseISO, isWithinInterval } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import './OrdersChart.css';
 
+// Helpers
+const fmt = (d) => format(new Date(d), 'yyyy-MM-dd');
+const formatINR = (n) =>
+  (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+function fillDates(startDate, endDate, seed = {}) {
+  const out = {};
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = fmt(d);
+    out[key] = { date: key, orderCount: 0, revenue: 0, ...(seed[key] || {}) };
+  }
+  return out;
+}
+
 function OrdersChart() {
-  const [payload, setPayload] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-  const [range, setRange] = useState(() => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 30);
-    return {
-      startDate: format(start, 'yyyy-MM-dd'),
-      endDate: format(end, 'yyyy-MM-dd'),
-    };
+  const [dateRange, setDateRange] = useState({
+    startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
   });
+  const [rawDashboard, setRawDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    (async () => {
+    let isMounted = true;
+    const run = async () => {
+      setLoading(true);
+      setError('');
       try {
+        // Single source of truth: dashboard endpoint
         const res = await dashboardAPI.getSummary();
-        const data = res?.data?.data ?? res?.data ?? {};
-        setPayload(data);
-      } catch (e) {
-        setErr('Failed to fetch orders data');
-        console.error(e);
+        if (!isMounted) return;
+        setRawDashboard(res.data || res);
+      } catch (err) {
+        if (!isMounted) return;
+        setError('Failed to fetch orders data');
+        console.error(err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
-    })();
+    };
+    run();
+    // we fetch once; chart recomputes when date changes
+    return () => { isMounted = false; };
   }, []);
 
-  const chartData = useMemo(() => {
-    if (!payload) return [];
+  const data = useMemo(() => {
+    if (!rawDashboard) return [];
 
-    // Prefer backend-provided dailyRevenue; else compute from recentOrders
-    let rows = Array.isArray(payload.dailyRevenue) ? payload.dailyRevenue.map(r => ({
-      date: r.date,
-      count: r.orderCount ?? r.count ?? 0,
-    })) : [];
+    const { dailyRevenue, recentOrders } = rawDashboard;
 
-    if (!rows.length && Array.isArray(payload.recentOrders)) {
-      const map = new Map();
-      for (const o of payload.recentOrders) {
-        const key = (o.createdAt || o.created_at || '').slice(0, 10);
-        if (!key) continue;
-        map.set(key, (map.get(key) || 0) + 1);
-      }
-      rows = Array.from(map.entries())
-        .map(([date, count]) => ({ date, count }))
-        .sort((a, b) => (a.date < b.date ? -1 : 1));
+    const start = new Date(dateRange.startDate);
+    const end = new Date(dateRange.endDate);
+    if (start > end) return [];
+
+    // 1) If backend gives a daily series, trust it and filter by range
+    if (Array.isArray(dailyRevenue) && dailyRevenue.length) {
+      const base = dailyRevenue.reduce((acc, row) => {
+        const key = fmt(row.date || row.day || row.ds || row.Date || row.D);
+        acc[key] = {
+          date: key,
+          orderCount: Number(row.orderCount || row.count || row.orders || 0),
+          revenue: Number(row.revenue || row.total || 0),
+        };
+        return acc;
+      }, {});
+      const filled = fillDates(dateRange.startDate, dateRange.endDate, base);
+      return Object.values(filled);
     }
 
-    // Filter by chosen date range
-    const start = parseISO(range.startDate);
-    const end = parseISO(range.endDate);
-    return rows.filter(r => {
-      const d = parseISO(r.date);
-      return isWithinInterval(d, { start, end });
-    });
-  }, [payload, range]);
-
-  if (loading) return <div className="orders-chart loading">Loading…</div>;
-  if (err) return <div className="orders-chart error">{err}</div>;
+    // 2) Fallback: derive from recentOrders (last N). We group per day and fill missing dates.
+    const grouped = (recentOrders || []).reduce((acc, o) => {
+      const key = fmt(o.createdAt || o.processedAt || o.date);
+      if (!acc[key]) acc[key] = { date: key, orderCount: 0, revenue: 0 };
+      acc[key].orderCount += 1;
+      acc[key].revenue += Number(o.totalPrice || o.total || 0);
+      return acc;
+    }, {});
+    const filled = fillDates(dateRange.startDate, dateRange.endDate, grouped);
+    return Object.values(filled);
+  }, [rawDashboard, dateRange]);
 
   const onDateChange = (e) => {
     const { name, value } = e.target;
-    setRange(prev => ({ ...prev, [name]: value }));
+    setDateRange((prev) => ({ ...prev, [name]: value }));
   };
+
+  if (loading) return <div className="orders-chart loading">Loading...</div>;
+  if (error) return <div className="orders-chart error">{error}</div>;
+
+  const currencySymbol = '₹';
 
   return (
     <div className="orders-chart">
       <div className="chart-header">
-        <h3>Orders Over Time</h3>
+        <h3>Orders & Revenue Over Time</h3>
         <div className="date-controls">
-          <input type="date" name="startDate" value={range.startDate} onChange={onDateChange} />
+          <input
+            type="date"
+            name="startDate"
+            value={dateRange.startDate}
+            max={dateRange.endDate}
+            onChange={onDateChange}
+          />
           <span>to</span>
-          <input type="date" name="endDate" value={range.endDate} onChange={onDateChange} />
+          <input
+            type="date"
+            name="endDate"
+            value={dateRange.endDate}
+            min={dateRange.startDate}
+            onChange={onDateChange}
+          />
         </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={chartData}>
+      <ResponsiveContainer width="100%" height={320}>
+        <ComposedChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="date" />
-          <YAxis allowDecimals={false} />
-          <Tooltip />
-          <Line type="monotone" dataKey="count" stroke="#8884d8" activeDot={{ r: 6 }} />
-        </LineChart>
+          <YAxis yAxisId="left" label={{ value: 'Orders', angle: -90, position: 'insideLeft' }} />
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            label={{ value: 'Revenue (₹)', angle: 90, position: 'insideRight' }}
+          />
+          <Tooltip
+            formatter={(value, name) => {
+              if (name.toLowerCase().includes('revenue')) {
+                return [`${currencySymbol}${formatINR(value)}`, 'Revenue'];
+              }
+              return [value, 'Orders'];
+            }}
+          />
+          <Legend />
+          {/* Orders as bars */}
+          <Bar yAxisId="left" dataKey="orderCount" name="Orders" />
+          {/* Revenue as line */}
+          <Line yAxisId="right" type="monotone" dataKey="revenue" name="Revenue" dot={false} />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
