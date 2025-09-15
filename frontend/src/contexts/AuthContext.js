@@ -1,55 +1,75 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
-import axios from "axios";
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import axios from 'axios';
 
 const AuthContext = createContext(null);
-export const useAuth = () => useContext(AuthContext);
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Hydrate auth from localStorage exactly once
   useEffect(() => {
-    const base = process.env.REACT_APP_API_URL || ""; // same-origin (Vercel routes proxy)
-    axios.defaults.baseURL = base;
-
-    const token = localStorage.getItem("token");
-    const user = localStorage.getItem("user");
-    if (token && user) {
-      axios.defaults.headers.common.Authorization = `Bearer ${token}`;
-      try { setCurrentUser(JSON.parse(user)); } catch {}
+    try {
+      const token = localStorage.getItem('token');
+      const userRaw = localStorage.getItem('user');
+      if (token) {
+        axios.defaults.baseURL = process.env.REACT_APP_API_URL;
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      }
+      if (userRaw) {
+        setCurrentUser(JSON.parse(userRaw));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
     }
-    setReady(true);
   }, []);
 
   const login = async (email, password) => {
     try {
-      const base = process.env.REACT_APP_API_URL || "";
-      const { data } = await axios.post(`${base}/api/auth/login`, { email, password });
-      const { token, user } = data || {};
-      if (token && user) {
-        localStorage.setItem("token", token);
-        localStorage.setItem("user", JSON.stringify(user));
-        axios.defaults.baseURL = base;
-        axios.defaults.headers.common.Authorization = `Bearer ${token}`;
-        setCurrentUser(user);
-        return { success: true };
-      }
-      return { success: false, error: "Invalid login response" };
-    } catch (e) {
-      return { success: false, error: e?.response?.data?.message || "Login failed" };
+      const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/auth/login`, {
+        email,
+        password,
+      });
+      const { token, user } = res.data;
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      axios.defaults.baseURL = process.env.REACT_APP_API_URL;
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+      setCurrentUser(user);
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: err.response?.data?.message || 'Login failed',
+      };
     }
   };
 
   const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    delete axios.defaults.headers.common.Authorization;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    delete axios.defaults.headers.common['Authorization'];
     setCurrentUser(null);
   };
 
-  return (
-    <AuthContext.Provider value={{ currentUser, isAuthenticated: !!currentUser, login, logout, ready }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      currentUser,
+      login,
+      logout,
+      loading,
+      isAuthenticated: !!currentUser && !!localStorage.getItem('token'),
+    }),
+    [currentUser, loading]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

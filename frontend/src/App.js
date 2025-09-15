@@ -1,34 +1,55 @@
-import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import Login from "./components/Auth";
-import Dashboard from "./components/Dashboard";
-import "./App.css";
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import Login from './components/Auth/Login';
+import Dashboard from './components/Dashboard';
+import './App.css';
 
 function FullScreenLoader() {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#555" }}>
-      Loading…
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="loading">Loading…</div>
     </div>
   );
 }
 
 function ProtectedRoute({ children }) {
-  const auth = useAuth();
-  if (!auth || !auth.ready) return <FullScreenLoader />;
-  return auth.isAuthenticated ? children : <Navigate to="/login" replace />;
+  const { loading, isAuthenticated } = useAuth();
+  if (loading) return <FullScreenLoader />;
+  return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+function PublicOnlyRoute({ children }) {
+  const { loading, isAuthenticated } = useAuth();
+  if (loading) return <FullScreenLoader />;
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children;
 }
 
 export default function App() {
   return (
     <AuthProvider>
       <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <div className="App">
+          <Routes>
+            <Route
+              path="/login"
+              element={
+                <PublicOnlyRoute>
+                  <Login />
+                </PublicOnlyRoute>
+              }
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </div>
       </Router>
     </AuthProvider>
   );
