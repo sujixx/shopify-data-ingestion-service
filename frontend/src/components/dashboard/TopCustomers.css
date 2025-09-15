@@ -1,0 +1,60 @@
+.top-customers {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.top-customers h3 {
+  margin: 0 0 20px 0;
+  color: #333;
+}
+
+.customers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.customer-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+.rank {
+  background-color: #1976d2;
+  color: white;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  margin-right: 15px;
+  flex-shrink: 0;
+}
+
+.customer-info {
+  flex-grow: 1;
+}
+
+.customer-info .name {
+  font-weight: 500;
+  color: #333;
+}
+
+.customer-info .email {
+  font-size: 12px;
+  color: #666;
+}
+
+.spend {
+  font-weight: bold;
+  color: #1976d2;
+  flex-shrink: 0;
+}
