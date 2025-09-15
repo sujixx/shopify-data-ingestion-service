@@ -16,7 +16,6 @@ function AutoBackfillOnce() {
     let cancelled = false;
     (async () => {
       try {
-        // Only in browser, and only once per device
         if (typeof window === 'undefined') return;
         if (localStorage.getItem('syncedOnce') === 'true') return;
 
@@ -33,7 +32,7 @@ function AutoBackfillOnce() {
         localStorage.setItem('syncedOnce', 'true');
         if (!cancelled) setRan(true);
       } catch {
-        // stay silent; dashboard still works
+        // silent; UI still works
       }
     })();
     return () => {
@@ -45,20 +44,23 @@ function AutoBackfillOnce() {
 }
 
 function Dashboard() {
-  // Safe guard: if context not ready or token missing, send to login
-  const auth = useAuth?.() || null;
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-  if (!auth || !token) return <Navigate to="/login" replace />;
+  // ✅ Call hooks UNCONDITIONALLY at the very top
+  const auth = useAuth();                   // no conditional/optional call
+  const [hasToken, setHasToken] = useState(false);
 
-  const { currentUser, logout } = auth;
-
-  // Theme auto-load
   useEffect(() => {
+    // theme + token init always runs (no conditional hooks)
     if (typeof window !== 'undefined') {
+      setHasToken(!!localStorage.getItem('token'));
       const saved = localStorage.getItem('theme');
       if (saved === 'dark') document.body.classList.add('dark');
     }
   }, []);
+
+  // After hooks: guard route
+  if (!auth || !hasToken) return <Navigate to="/login" replace />;
+
+  const { currentUser, logout } = auth;
 
   const toggleTheme = () => {
     const isDark = document.body.classList.toggle('dark');
@@ -85,7 +87,7 @@ function Dashboard() {
           <StoreConnection />
           <SummaryCards />
 
-          {/* New AI-style panel */}
+          {/* AI-style insights (client-side computed) */}
           <AIInsightsPanel />
 
           <div className="charts-row">
