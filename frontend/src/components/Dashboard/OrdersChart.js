@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { dashboardAPI } from '../../services/api';
 import { format, subDays } from 'date-fns';
@@ -13,24 +13,27 @@ function OrdersChart() {
     endDate: format(new Date(), 'yyyy-MM-dd')
   });
 
-  useEffect(() => {
-    fetchOrdersData();
-  }, [dateRange]);
-
-  const fetchOrdersData = async () => {
+  const fetchOrdersData = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      const response = await dashboardAPI.getOrdersByDate(
-        dateRange.startDate, 
+      const res = await dashboardAPI.getOrdersByDate(
+        dateRange.startDate,
         dateRange.endDate
       );
-      setOrdersData(response.data);
+      setOrdersData(res.data || []);
     } catch (err) {
-      setError('Failed to fetch orders data');
       console.error(err);
+      setOrdersData([]);
+      setError('Failed to fetch orders data');
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateRange.startDate, dateRange.endDate]);
+
+  useEffect(() => {
+    fetchOrdersData();
+  }, [fetchOrdersData]);
 
   const handleDateChange = (e) => {
     const { name, value } = e.target;
@@ -60,14 +63,14 @@ function OrdersChart() {
           />
         </div>
       </div>
-      
+
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={ordersData}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="date" />
-          <YAxis />
+          <YAxis allowDecimals={false} />
           <Tooltip />
-          <Line type="monotone" dataKey="count" stroke="#8884d8" activeDot={{ r: 8 }} />
+          <Line type="monotone" dataKey="count" activeDot={{ r: 6 }} />
         </LineChart>
       </ResponsiveContainer>
     </div>
