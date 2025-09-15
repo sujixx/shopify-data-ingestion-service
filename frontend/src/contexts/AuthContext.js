@@ -1,6 +1,6 @@
+// src/contexts/AuthContext.js
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
-import { authAPI, getApiBaseUrl } from '../services/api';
+import { authAPI } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -12,58 +12,57 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Hydrate at app start
   useEffect(() => {
-    try {
-      const token = localStorage.getItem('token');
-      const userRaw = localStorage.getItem('user');
-      axios.defaults.baseURL = getApiBaseUrl();
-      if (token) axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      if (userRaw) setCurrentUser(JSON.parse(userRaw));
-    } catch {}
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const user = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+
+    if (token && user) {
+      try {
+        setCurrentUser(JSON.parse(user));
+      } catch {
+        localStorage.removeItem('user');
+      }
+    }
     setLoading(false);
   }, []);
 
   const login = async (email, password) => {
     try {
-      const { data } = await authAPI.login(email, password);
-      const { token, user } = data;
+      // IMPORTANT: use the proxied API (no CORS)
+      const res = await authAPI.login(email, password);
+      // res is an axios response
+      const { token, user } = res.data;
 
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-
-      axios.defaults.baseURL = getApiBaseUrl();
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
       setCurrentUser(user);
       return { success: true };
-    } catch (err) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Login failed (network/CORS/env?)';
-      console.error('Login error:', err);
-      return { success: false, error: msg };
+    } catch (e) {
+      console.error('Login error:', e);
+      return {
+        success: false,
+        error: e?.response?.data?.message || e?.message || 'Login failed',
+      };
     }
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    delete axios.defaults.headers.common['Authorization'];
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
     setCurrentUser(null);
   };
 
   const value = useMemo(
     () => ({
       currentUser,
+      isAuthenticated: !!currentUser,
       login,
       logout,
-      loading,
-      isAuthenticated: !!localStorage.getItem('token'),
     }),
-    [currentUser, loading]
+    [currentUser]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
 }

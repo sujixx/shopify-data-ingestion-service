@@ -1,43 +1,49 @@
+// src/services/api.js
 import axios from 'axios';
 
-// Single source of truth for the backend URL, with safe fallback.
-const DEFAULT_API_BASE =
-  (process.env.REACT_APP_API_URL && process.env.REACT_APP_API_URL.trim()) ||
-  'https://shopify-data-ingestion-service-production.up.railway.app';
+// Use Vercel proxy in production; env var on localhost
+function getBaseURL() {
+  if (typeof window !== 'undefined') {
+    const host = window.location.host || '';
+    const isVercel = host.endsWith('.vercel.app');
+    if (isVercel) return '/'; // so requests go to /api/* and get rewritten
+  }
+  return process.env.REACT_APP_API_URL || 'http://localhost:3000';
+}
 
-export const getApiBaseUrl = () => DEFAULT_API_BASE;
+const API_BASE_URL = getBaseURL();
 
 const api = axios.create({
-  baseURL: DEFAULT_API_BASE,
+  baseURL: API_BASE_URL,
   timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach token if present
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// On 401, bounce to /login — but not for the login call itself.
 api.interceptors.response.use(
-  (res) => res,
+  (response) => response,
   (error) => {
-    const status = error?.response?.status;
-    const reqUrl = error?.config?.url || '';
-    const isLogin = reqUrl.includes('/api/auth/login');
-    if (status === 401 && !isLogin) {
+    if (error?.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      if (typeof window !== 'undefined') window.location.href = '/login';
+      if (window.location.pathname !== '/login') window.location.href = '/login';
     }
     return Promise.reject(error);
   }
 );
+
+// Debug which baseURL you’re on
+if (typeof window !== 'undefined') {
+  // eslint-disable-next-line no-console
+  console.log('[API] baseURL =', API_BASE_URL, '| origin =', window.location.origin);
+}
 
 export const authAPI = {
   login: (email, password) => api.post('/api/auth/login', { email, password }),
@@ -53,10 +59,8 @@ export const dashboardAPI = {
 export const shopifyAPI = {
   connectStore: (shopifyDomain) => api.post('/api/shopify/connect', { shopifyDomain }),
   startAuth: (shop) => {
-    const base =
-      (process.env.REACT_APP_SHOPIFY_APP_URL && process.env.REACT_APP_SHOPIFY_APP_URL.trim()) ||
-      `${DEFAULT_API_BASE}/api/shopify`;
-    window.location.href = `${base}/auth?shop=${shop}`;
+    const base = '/api/shopify';
+    window.location.href = `${base}/auth?shop=${encodeURIComponent(shop)}`;
   },
   syncData: (resources) => api.post('/api/shopify/sync', { resources }),
 };
