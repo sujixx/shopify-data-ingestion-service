@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import SummaryCards from './SummaryCards';
 import OrdersChart from './OrdersChart';
 import TopCustomers from './TopCustomers';
-import StoreConnection from '../Store/StoreConnection';
+import StoreConnection from '../Store';
 import './Dashboard.css';
 
 function Dashboard() {

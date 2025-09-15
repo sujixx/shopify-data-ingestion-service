@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Login from './components/Auth/Login';
-import Dashboard from './components/Dashboard/Dashboard';
+import Login from './components/Auth';
+import Dashboard from './components/Dashboard';
 import './App.css';
 
 // Simple version without auth context for testing
