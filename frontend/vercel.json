@@ -3,11 +3,10 @@
   "builds": [
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "build" } }
   ],
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://shopify-data-ingestion-service-production.up.railway.app/api/$1" }
-  ],
   "routes": [
-    { "src": "/static/(.*)", "dest": "/static/$1" },
+    { "src": "/api/(.*)", "dest": "https://shopify-data-ingestion-service-production.up.railway.app/api/$1" },
+    { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
+
